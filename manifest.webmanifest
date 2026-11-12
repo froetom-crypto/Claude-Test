@@ -1,0 +1,14 @@
+{
+  "name": "Pünktlich Köln",
+  "short_name": "Pünktlich",
+  "description": "Verspätungsstatistik und Abfahrtsplanung für KVB-Stadtbahn und Busse in Köln",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0d0d0d",
+  "theme_color": "#1a1a19",
+  "lang": "de",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
