@@ -13,8 +13,9 @@
     del(k) { try { localStorage.removeItem(k); } catch { /* egal */ } },
   };
 
-  const DEFAULTS = { thr: 3, api: 'https://v6.db.transport.rest', remote: '', collect: true };
+  const DEFAULTS = { thr: 3, api: 'https://v6.db.transport.rest', remote: 'https://raw.githubusercontent.com/froetom-crypto/Claude-Test/stats-data/stats.json', collect: true };
   let cfg = { ...DEFAULTS, ...store.get('pk.cfg', {}) };
+  if (!cfg.remote) cfg.remote = DEFAULTS.remote;
   let favs = store.get('pk.favs', []);            // [{id,name}]
   let local = store.get('pk.lines', {});          // key -> Aggregat
   let seen = store.get('pk.seen', {});            // obsId -> zeitstempel (Dedupe)
