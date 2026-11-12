@@ -1,0 +1,18 @@
+name: diag
+on:
+  push:
+    branches: [ccr-a176c7b3-u1epln]
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          for u in \
+            "https://v6.db.transport.rest/locations?query=K%C3%B6ln%20Neumarkt&results=2" \
+            "https://v6.db.transport.rest/" \
+            "https://v6.vbb.transport.rest/locations?query=Alexanderplatz&results=1" \
+            "https://v5.db.transport.rest/locations?query=K%C3%B6ln&results=1" \
+            "https://dbf.finalrewind.org/K%C3%B6ln%20Neumarkt.json?hafas=DB" \
+            "https://int.bahn.de/web/api/reiseloesung/orte?suchbegriff=K%C3%B6ln%20Neumarkt&typ=ALL&limit=2" \
+            "https://www.bahn.de/web/api/reiseloesung/orte?suchbegriff=K%C3%B6ln%20Neumarkt&typ=ALL&limit=2" ; do
+            echo "=== $u"; curl -sS -m 20 -i -H 'accept: application/json' -H 'user-agent: Mozilla/5.0' "$u" | head -c 900; echo; done
