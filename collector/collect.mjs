@@ -83,7 +83,7 @@ for (const st of state.stops) {
         const agg = state.lines[key] ||= S.newAgg(key, name, product, agency);
         const cancelled = !!(s.cancelled || s.tripCancelled || pl.cancelled);
         const delayMin = s.realTime && pl.departure ? (Date.parse(pl.departure) - planned) / 60e3 : null;
-        S.addObs(agg, { planned, cancelled, delayMin });
+        S.addObs(agg, { planned, cancelled, delayMin, city: S.cityOf(pl.lat, pl.lon) });
         added++;
       }
     } catch (e) { console.warn(st.name, e.message); ok = false; break; }

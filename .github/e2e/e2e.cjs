@@ -28,6 +28,8 @@ const { chromium } = require('playwright-core');
   console.log('ROUTE:', (await txt('#route-out')).slice(0, 1800));
   const cmp = await page.$('#compare [data-mode=regional]'); if (cmp) { await cmp.click(); await page.waitForTimeout(300); console.log('REGIONAL:', (await txt('#route-out')).slice(0, 1200)); } else console.log('KEIN VERGLEICH');
   await page.click('[data-tab=lines]'); await page.waitForTimeout(300); console.log('BETRIEBE:', (await txt('#lines-out')).slice(0, 800));
+  await page.click('[data-view=cities]'); await page.waitForTimeout(300); console.log('STAEDTE:', (await txt('#lines-out')).slice(0, 600));
+  await page.selectOption('#line-sort', 'punct_asc'); await page.click('[data-view=lines]'); await page.waitForTimeout(300); console.log('LINIEN UNPUENKTLICHSTE:', (await txt('#lines-out')).slice(0, 600));
   await page.screenshot({ path: 'route.png', fullPage: true });
   // Linien
   await page.click('[data-tab=lines]'); await page.waitForTimeout(500);

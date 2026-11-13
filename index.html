@@ -84,38 +84,82 @@
     </section>
 
     <!-- LINES -->
-    <section id="tab-lines" class="tab" aria-label="Linien">
+    <section id="tab-lines" class="tab" aria-label="Statistik">
       <div class="card">
         <div class="seg" role="tablist" id="line-view" style="margin-bottom:10px">
           <button data-view="agencies" class="on">Verkehrsbetriebe</button>
           <button data-view="lines">Linien</button>
+          <button data-view="cities">Städte</button>
         </div>
-        <label class="field"><span>Suchen</span>
-          <input id="line-q" type="search" placeholder="Betrieb, Stadt oder Linie, z. B. KVB, Hamburg, S1, 7" inputmode="search">
+        <label class="field"><span>Suche</span>
+          <input id="line-q" type="search" placeholder="Stadt, Betrieb oder Linie – z. B. Köln, KVB, S1, 7" inputmode="search" autocomplete="off">
         </label>
-        <div class="chips" id="agency-filter"></div>
-        <div class="grid2">
-          <label class="field"><span>Sortieren nach</span>
-            <select id="line-sort">
-              <option value="tot">Meiste Fahrten</option>
-              <option value="worst">Unpünktlichste zuerst</option>
-              <option value="best">Pünktlichste zuerst</option>
-              <option value="name">Name</option>
-            </select>
-          </label>
-          <label class="field"><span>Verkehrsmittel</span>
-            <select id="line-prod">
-              <option value="">Alle</option>
-              <option value="tram">Straßenbahn / Stadtbahn</option>
-              <option value="subway">U-Bahn</option>
-              <option value="bus">Bus</option>
-              <option value="suburban">S-Bahn</option>
-              <option value="regional">Regionalverkehr (RB/RE)</option>
-              <option value="national">Fernverkehr (ICE/IC)</option>
-            </select>
-          </label>
-        </div>
-        <div class="seg" role="tablist" id="line-src">
+        <div class="chips" id="active-filters"></div>
+        <details class="opts" id="filter-box" open><summary>Filter &amp; Sortierung</summary>
+          <div class="grid2">
+            <label class="field"><span>Sortieren nach</span>
+              <select id="line-sort">
+                <option value="tot_desc">Fahrten – meiste zuerst</option>
+                <option value="tot_asc">Fahrten – wenigste zuerst</option>
+                <option value="punct_desc">Pünktlichkeit – beste zuerst</option>
+                <option value="punct_asc">Pünktlichkeit – schlechteste zuerst</option>
+                <option value="cancel_desc">Ausfälle – meiste zuerst</option>
+                <option value="cancel_asc">Ausfälle – wenigste zuerst</option>
+                <option value="mean_desc">Ø Verspätung – größte zuerst</option>
+                <option value="mean_asc">Ø Verspätung – kleinste zuerst</option>
+                <option value="late5_desc">≥ 5 Min. zu spät – meiste zuerst</option>
+                <option value="late5_asc">≥ 5 Min. zu spät – wenigste zuerst</option>
+                <option value="name_asc">Name A–Z</option>
+                <option value="name_desc">Name Z–A</option>
+                <option value="city_asc">Stadt A–Z</option>
+              </select>
+            </label>
+            <label class="field"><span>Stadt</span>
+              <select id="f-city"><option value="">Alle Städte</option></select>
+            </label>
+            <label class="field"><span>Verkehrsmittel</span>
+              <select id="line-prod">
+                <option value="">Alle</option>
+                <option value="tram">Straßenbahn / Stadtbahn</option>
+                <option value="subway">U-Bahn</option>
+                <option value="bus">Bus</option>
+                <option value="suburban">S-Bahn</option>
+                <option value="regional">Regionalverkehr (RB/RE)</option>
+                <option value="national">Fernverkehr (ICE/IC)</option>
+              </select>
+            </label>
+            <label class="field"><span>Pünktlichkeit</span>
+              <select id="f-punct">
+                <option value="">Alle</option>
+                <option value="95">sehr gut (ab 95 %)</option>
+                <option value="90">gut (ab 90 %)</option>
+                <option value="80-90">mittel (80–90 %)</option>
+                <option value="-80">schlecht (unter 80 %)</option>
+                <option value="-65">sehr schlecht (unter 65 %)</option>
+              </select>
+            </label>
+            <label class="field"><span>Ausfälle</span>
+              <select id="f-cancel">
+                <option value="">Alle</option>
+                <option value="0">keine Ausfälle</option>
+                <option value="2">mehr als 2 %</option>
+                <option value="5">mehr als 5 %</option>
+                <option value="10">mehr als 10 %</option>
+              </select>
+            </label>
+            <label class="field"><span>Mindestens … Fahrten</span>
+              <select id="f-min">
+                <option value="1">alle</option>
+                <option value="10">10 (aussagekräftiger)</option>
+                <option value="30">30</option>
+                <option value="100">100</option>
+                <option value="500">500</option>
+              </select>
+            </label>
+          </div>
+          <button type="button" id="f-reset" style="width:100%">Filter zurücksetzen</button>
+        </details>
+        <div class="seg" role="tablist" id="line-src" style="margin-top:10px">
           <button data-src="all" class="on">Alle Daten</button>
           <button data-src="local">Nur dieses Handy</button>
           <button data-src="remote">Nur Server-Statistik</button>
