@@ -1,5 +1,6 @@
-name: diag
+name: Live-Test (echter Browser, echte Daten)
 on:
+  workflow_dispatch:
   push:
     branches: [ccr-a176c7b3-u1epln]
 jobs:

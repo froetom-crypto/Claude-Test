@@ -106,7 +106,7 @@
       const isStop = x.type === 'STOP';
       const name = x.type === 'ADDRESS' ? [x.street || x.name, x.houseNumber].filter(Boolean).join(' ') + (city ? ', ' + city : '') : x.name;
       return { type: isStop ? 'stop' : 'location', poi: x.type === 'PLACE', id: x.id, name, address: name, latitude: x.lat, longitude: x.lon, city, d: distKm(x.lat, x.lon) };
-    }).sort((a, b) => (a.d < 30 ? 0 : 1) - (b.d < 30 ? 0 : 1)); // Köln und Umgebung nach vorn
+    }).filter((x, _, all) => x.d < 60 || !all.some((y) => y.d < 60)); // nur Köln & Umgebung, falls vorhanden
   }
 
   function normDep(s) {
@@ -396,7 +396,7 @@
           if (k === 0 && L.cancelled) { cancelHit = true; continue; }
           if (!known && rnd() < L.dist.pc) { if (planned + 60e3 >= ready) cancelHit = true; continue; }
           let d;
-          if (known) d = Math.max(-60, L.liveDelay + (sampleDelaySec(L.dist, rnd) - (L.dist.median + 0.5) * 60) * 0.5);
+          if (known) d = Math.max(Math.min(0, L.liveDelay), L.liveDelay + (sampleDelaySec(L.dist, rnd) - (L.dist.median + 0.5) * 60) * 0.5);
           else d = sampleDelaySec(L.dist, rnd);
           actDep = planned + d * 1000;
           if (actDep >= ready) break;
@@ -545,7 +545,7 @@
         });
         info.push({ l, line, dep, arr, live, cancelled: !!l.cancelled, n, basis, sum: S.summary(agg, cfg.thr), headway: legs[legs.length - 1].headway });
       }
-      const startAt = legs.length ? legs[0].dep : now;
+      const startAt = legs.length ? legs[0].dep - 60e3 : now; // 1 Min. vor Abfahrt an der Haltestelle
       const sim = simulate(legs, target, startAt);
       const leave = Date.parse(j.legs[0].plannedDeparture || j.legs[0].departure) - walk * 60e3;
       return { j, legs, info, sim, leave, transfers: info.filter((x) => !x.walk).length - 1 };
