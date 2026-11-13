@@ -187,3 +187,14 @@ details summary { cursor: pointer; color: var(--accent); font-size: 14px; margin
 .err { border-color: var(--critical); }
 .loading { color: var(--ink-2); padding: 12px 0; }
 @media (max-width: 380px) { .hero .big { font-size: 38px; } .kpi b { font-size: 17px; } }
+
+/* vereinfachte Bedienung */
+.chips.big { margin-bottom: 12px; }
+.chips.big .chip { min-height: 48px; font-size: 16px; font-weight: 600; padding: 6px 16px; border-radius: 24px; background: var(--card); }
+.chips.big .chip small { display: block; font-weight: 400; font-size: 12px; color: var(--ink-2); }
+input.date { max-width: 44%; }
+details.opts { margin: 4px 0 12px; }
+details.opts > summary { color: var(--ink-2); }
+.verdict { font-size: 17px; font-weight: 600; margin-top: 10px; }
+.hero .why { font-size: 13px; color: var(--ink-2); margin-top: 6px; }
+.row.center { justify-content: center; margin-top: 12px; }

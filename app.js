@@ -71,7 +71,7 @@
           return await r.json();
         } catch (e) {
           clearTimeout(to);
-          lastErr = e.name === 'AbortError' ? new Error('Zeitüberschreitung bei der Auskunft') : e;
+          lastErr = e.name === 'AbortError' ? new Error('Zeitüberschreitung bei der Auskunft') : e instanceof TypeError ? new Error('Keine Verbindung zur Live-Auskunft (offline, oder diese Ansicht blockiert Internetzugriffe).') : e;
           await new Promise((res) => setTimeout(res, 700));
         }
       }
@@ -432,6 +432,19 @@
   // ---------- ROUTE ----------
   const routeOut = $('#route-out');
   let lastQuery = null;
+  let routes = store.get('pk.routes', []);
+  const short = (n) => String(n || '').replace(/^Köln[ ,]+/, '');
+  function renderRouteFavs() {
+    $('#route-favs').innerHTML = routes.map((r, i) => `<button class="chip" data-i="${i}">${esc(short(r.from.name))} → ${esc(short(r.to.name))}<small>an ${esc(r.time || '')} · tippen zum Berechnen</small></button>`).join('');
+  }
+  // Uhrzeit setzen; liegt sie heute schon zurück, gilt morgen
+  function setArrival(time) {
+    const now = Date.now();
+    const today = new Date(now).toLocaleDateString('sv-SE', { timeZone: 'Europe/Berlin' });
+    let date = today;
+    if (berlinToMs(today, time) < now) date = new Date(now + 864e5).toLocaleDateString('sv-SE', { timeZone: 'Europe/Berlin' });
+    $('#arr-date').value = date; $('#arr-time').value = time;
+  }
   function initRoute() {
     const d = new Date(Date.now() + 45 * 60e3);
     $('#arr-date').value = d.toLocaleDateString('sv-SE', { timeZone: 'Europe/Berlin' });
@@ -453,6 +466,20 @@
       }, (err) => { $('#from').value = ''; alert('Standort nicht verfügbar: ' + err.message); }, { enableHighAccuracy: true, timeout: 10000 });
     });
     $('#route-form').addEventListener('submit', (e) => { e.preventDefault(); planRoute(); });
+    $('#swap').addEventListener('click', () => {
+      const f = $('#from'), t = $('#to');
+      [f.value, t.value] = [t.value, f.value]; [f._picked, t._picked] = [t._picked, f._picked];
+    });
+    $('#route-favs').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-i]'); if (!b) return;
+      const r = routes[b.dataset.i];
+      if (e.target.closest('.del')) { routes.splice(b.dataset.i, 1); store.set('pk.routes', routes); renderRouteFavs(); return; }
+      $('#from').value = r.from.name; $('#from')._picked = r.from;
+      $('#to').value = r.to.name; $('#to')._picked = r.to;
+      if (r.time) setArrival(r.time);
+      planRoute();
+    });
+    renderRouteFavs();
   }
 
   function berlinToMs(date, time) {
@@ -559,17 +586,41 @@
     const recOK = rec.sim.p >= conf;
     const lv = level(rec.sim.p);
     const minsTo = Math.round((rec.leave - now) / 60e3);
+    const recLegs = rec.info.filter((x) => !x.walk);
+    const firstLeg = recLegs[0];
+    const how = recLegs.map((x) => `${productName(x.line.product)} ${x.line.label}`).join(' → ');
+    const verdict = !recOK ? 'Riskant – keine Verbindung ist sicher genug. Lieber früher los!'
+      : rec.sim.p >= 0.95 ? 'Sehr sicher 👍' : rec.sim.p >= 0.9 ? 'Sicher' : 'Etwas Puffer einplanen';
+    const biggest = [['Ausfall', rec.sim.rCancel], ['verpasster Umstieg', rec.sim.rMiss], ['Verspätung', rec.sim.rDelay]].sort((x, y) => y[1] - x[1])[0];
     let html = `<div class="card hero">
-      <div class="muted">${recOK ? 'Spätestens losgehen um' : 'Keine Verbindung schafft ' + pct(conf) + ' – die sicherste:'}</div>
+      <div class="muted">${recOK ? 'Geh spätestens los um' : 'Am sichersten: los um'}</div>
       <div class="big">${hm(rec.leave)}</div>
-      <div class="sub">${minsTo >= 0 ? (minsTo < 120 ? `in ${minsTo} Min.` : '') : `vor ${-minsTo} Min.`} · Ankunft geplant ${hm(Date.parse(rec.j.legs.at(-1).plannedArrival || rec.j.legs.at(-1).arrival))}</div>
-      <div style="margin-top:10px">${statusTag(rec.sim.p, `${pct(rec.sim.p)} Chance, pünktlich zu sein`)}</div>
-      <div class="note">Zu spät: ${pct(1 - rec.sim.p)} – davon durch Ausfall ${pct(rec.sim.rCancel)}, verpassten Umstieg ${pct(rec.sim.rMiss)}, Verspätung ${pct(rec.sim.rDelay)}</div>
+      <div class="sub">${minsTo >= 0 ? (minsTo < 120 ? `in ${minsTo} Min. · ` : '') : ''}${esc(how)}${firstLeg ? ` ab ${esc(firstLeg.l.origin?.name)} um ${hm(firstLeg.dep)}` : ''}</div>
+      <div class="verdict">${statusTag(rec.sim.p, `${pct(rec.sim.p)} pünktlich`)}</div>
+      <div class="verdict">${verdict}</div>
+      ${1 - rec.sim.p >= 0.01 ? `<div class="why">Größtes Risiko: ${biggest[0]}</div>` : ''}
+      ${firstLeg && (firstLeg.cancelled || (firstLeg.live || 0) >= 180) ? `<div class="why"><b>Live:</b> ${firstLeg.cancelled ? 'Diese Fahrt fällt aus!' : `${firstLeg.line.label} hat gerade +${Math.round(firstLeg.live / 60)} Min.`}</div>` : ''}
+      <div class="row center"><button id="save-route" class="chip">☆ Strecke merken</button></div>
     </div>`;
-    html += evals.map((e) => journeyHTML(e, e === rec, target)).join('');
-    if (earlierRef) html += `<button id="earlier" style="width:100%;margin-bottom:12px">Frühere Verbindungen laden</button>`;
-    html += `<p class="note">Ziel: ankommen bis ${hm(target)}. Wahrscheinlichkeiten aus 3000 simulierten Fahrten je Verbindung, auf Basis der echten Verspätungsverteilung jeder Linie.</p>`;
+    html += `<div class="card">${journeyHTML(rec, true, target).replace(/^<div class="card journey rec">/, '<div class="journey">')}</div>`;
+    const others = evals.filter((e) => e !== rec);
+    if (others.length) html += `<details class="card"><summary>Andere Verbindungen (${others.length})</summary>${others.map((e) => journeyHTML(e, false, target)).join('')}
+      ${earlierRef ? `<button id="earlier" style="width:100%;margin-top:8px">Frühere Verbindungen laden</button>` : ''}</details>`;
+    html += `<p class="note">Berechnet aus echten Live-Daten und der Verspätungsstatistik jeder Linie (3000 simulierte Fahrten). Ankommen bis ${hm(target)}.</p>`;
     routeOut.innerHTML = html;
+    $('.hero', routeOut).scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const sv = $('#save-route');
+    if (sv) {
+      const key = (r) => (r.from.id || r.from.name) + '>' + (r.to.id || r.to.name);
+      const cur = { from: $('#from')._picked, to: $('#to')._picked };
+      const isSaved = () => routes.some((r) => key(r) === key(cur));
+      sv.textContent = isSaved() ? '★ Gemerkt' : '☆ Strecke merken';
+      sv.onclick = () => {
+        if (isSaved()) return;
+        routes = routes.concat([{ ...cur, time: $('#arr-time').value }]).slice(-6);
+        store.set('pk.routes', routes); renderRouteFavs(); sv.textContent = '★ Gemerkt';
+      };
+    }
     const btn = $('#earlier'); if (btn) btn.onclick = () => planRoute(earlierRef);
   }
 
