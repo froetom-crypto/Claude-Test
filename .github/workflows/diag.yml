@@ -7,14 +7,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: |
-          T=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          for u in \
-            "https://api.transitous.org/api/v1/geocode?text=K%C3%B6ln%20Neumarkt" \
-            "https://efa.vrr.de/standard/XML_STOPFINDER_REQUEST?outputFormat=rapidJSON&type_sf=any&name_sf=K%C3%B6ln%20Neumarkt&anyMaxSizeHitList=3" \
-            "https://efa.vrr.de/standard/XML_DM_REQUEST?outputFormat=rapidJSON&type_dm=any&name_dm=K%C3%B6ln%20Neumarkt&mode=direct&useRealtime=1&limit=4" \
-            "https://db.transport.rest/" \
-            "https://v6.db.transport.rest.de/" ; do
-            echo; echo "=== $u"; curl -sS -m 25 -D - -o body.txt -H 'Origin: https://froetom-crypto.github.io' -H 'user-agent: Mozilla/5.0' "$u" | grep -iE '^HTTP|access-control-allow-origin|content-type'; head -c 2500 body.txt; echo; done
-          ID=$(curl -sS "https://api.transitous.org/api/v1/geocode?text=K%C3%B6ln%20Neumarkt" | python3 -c "import sys,json;d=json.load(sys.stdin);print([x for x in d if x.get('type')=='STOP'][0]['id'])" || true)
-          echo "=== transitous stoptimes $ID"
-          for v in v1 v4 v5; do curl -sS -m 25 -G "https://api.transitous.org/api/$v/stoptimes" --data-urlencode "stopId=$ID" --data-urlencode "n=6" --data-urlencode "time=$T" | head -c 3000; echo; done
+          set +e
+          ID='de-DELFI_de:05315:11111:1:11'
+          P=$(date -u -d '-60 min' +%Y-%m-%dT%H:%M:%SZ)
+          for v in v1 v2 v3 v4 v5; do
+            echo "=== stoptimes $v"; curl -sS -m 25 -G "https://api.transitous.org/api/$v/stoptimes" --data-urlencode "stopId=$ID" --data-urlencode "n=40" --data-urlencode "time=$P" -o st_$v.json -w '%{http_code}\n'; head -c 2500 st_$v.json; echo
+            python3 - st_$v.json <<'PY'
+          import json,sys
+          try:
+            d=json.load(open(sys.argv[1])); st=d.get('stopTimes',[])
+            print('count',len(st),'keys',list(d.keys()))
+            for s in st[:40]:
+              p=s.get('place',{})
+              print(s.get('routeShortName'),s.get('mode'),s.get('realTime'),s.get('cancelled'),p.get('scheduledDeparture'),p.get('departure'),s.get('agencyName'),s.get('headsign'))
+          except Exception as e: print('ERR',e)
+          PY
+          done
+          F='50.9357,6.9477'; T='50.9601,6.9574'
+          A=$(date -u -d '+60 min' +%Y-%m-%dT%H:%M:%SZ)
+          for v in v1 v2 v3 v4 v5; do echo "=== plan $v"; curl -sS -m 30 -G "https://api.transitous.org/api/$v/plan" --data-urlencode "fromPlace=$ID" --data-urlencode "toPlace=$T" --data-urlencode "time=$A" --data-urlencode "arriveBy=true" -w '\n%{http_code}\n' | head -c 3500; echo; done
+          echo "=== EFA DM realtime"; curl -sS -m 25 "https://efa.vrr.de/standard/XML_DM_REQUEST?outputFormat=rapidJSON&type_dm=stop&name_dm=de:05315:11111&mode=direct&useRealtime=1&limit=5&itdDateTimeDepArr=dep" | head -c 3000
