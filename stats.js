@@ -70,6 +70,7 @@
   function addArr(a, b) { for (let i = 0; i < b.length; i++) a[i] = (a[i] || 0) + (b[i] || 0); return a; }
 
   function mergeAgg(a, b) {
+    if (!a && !b) return null;
     const out = newAgg(a ? a.key : b.key, (a || b).name, (a || b).product, (a || b).agency);
     for (const x of [a, b]) {
       if (!x) continue;
@@ -127,7 +128,28 @@
     return { tot, punct: ok / tot, cancel: c[0] / tot };
   }
 
-  const api = { newAgg, addObs, mergeAgg, mergeMaps, summary, coarsePunct, pruneDays, berlin, HB, CB };
+  /** Einheitliche Liniennamen für App und Sammler: { name, product } */
+  function normLineName(raw, product) {
+    let name = String(raw || '?').trim().replace(/\s*\(\d+\)\s*$/, '');      // "RE7 (11292)" -> "RE7"
+    const rail = /^(ICE|ICD|IC|EC|ECE|EN|NJ|RJX?|TGV|FLX|WB)\b/i.exec(name);
+    if (rail || product === 'national' || product === 'nationalExpress') {
+      const cat = (rail ? rail[1] : name.split(/\s+/)[0]).toUpperCase();
+      return { name: cat, product: cat === 'ICE' || cat === 'ICD' ? 'nationalExpress' : 'national' };
+    }
+    name = name.replace(/^(STR|Str|Tram|Stadtbahn|Bus|BUS)\s+/, '').trim() || name;
+    const isRailName = /^(S|RE|RB|U)\s?\d/i.test(name);
+    if (product === 'bus' && /^(S|RE|RB)\s?\d/i.test(name)) return { name: name.replace(/\s+/g, '') + ' Ersatzbus', product: 'bus' };
+    if (isRailName) {
+      name = name.replace(/\s+/g, '');
+      if (/^S\d/i.test(name)) product = 'suburban';
+      else if (/^U\d/i.test(name)) product = 'subway';
+      else if (/^RE\d/i.test(name)) product = 'regionalExpress';
+      else if (/^RB\d/i.test(name)) product = 'regional';
+    }
+    return { name, product };
+  }
+
+  const api = { normLineName, newAgg, addObs, mergeAgg, mergeMaps, summary, coarsePunct, pruneDays, berlin, HB, CB };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.PStats = api;
 })(typeof self !== 'undefined' ? self : this);

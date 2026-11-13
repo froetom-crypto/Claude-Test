@@ -65,7 +65,7 @@ for (const st of state.stops) {
     const res = await get('/api/v1/stoptimes', { stopId: st.id, time: new Date(from).toISOString(), n: 300 });
     for (const s of res.stopTimes || []) {
       const pl = s.place || {};
-      const product = MODE[s.mode];
+      let product = MODE[s.mode];
       if (!product || (s.tripTo && s.tripTo.stopId === pl.stopId)) continue;
       const planned = Date.parse(pl.scheduledDeparture);
       if (!(planned >= from && planned < to)) continue;
@@ -73,7 +73,9 @@ for (const st of state.stops) {
       if (state.seen[id]) continue;
       state.seen[id] = now;
       const agency = String(s.agencyName || '').trim();
-      const name = normName(s.routeShortName || s.displayName), key = `${product}|${name}|${agency}`;
+      const nl = S.normLineName(s.routeShortName || s.displayName, product);
+      product = nl.product;
+      const name = nl.name, key = `${product}|${name}|${agency}`;
       const agg = state.lines[key] ||= S.newAgg(key, name, product, agency);
       const cancelled = !!(s.cancelled || s.tripCancelled || pl.cancelled);
       const delayMin = s.realTime && pl.departure ? (Date.parse(pl.departure) - planned) / 60e3 : null;

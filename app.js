@@ -44,11 +44,9 @@
   };
   function normLine(line) {
     if (!line) return null;
-    const product = line.product || 'unknown';
-    let name = String(line.name || line.fahrtNr || '?').trim();
-    name = name.replace(/^(STR|Str|Tram|Stadtbahn|Bus|BUS|U|S|RB|RE|ICE|IC|EC|AST|TaxiBus)\s+/, '').trim() || name;
+    const { name, product } = S.normLineName(line.name || line.fahrtNr, line.product || 'unknown');
     const agency = String(line.agency || '').trim();
-    return { key: `${product}|${name}|${agency}`, name, product, agency, label: (product === 'suburban' || product === 'regional' || product === 'regionalExpress') ? (line.name || name) : name };
+    return { key: `${product}|${name}|${agency}`, name, product, agency, label: name };
   }
   const productName = (p) => PRODUCT[p] || p;
 
@@ -172,7 +170,8 @@
   }
 
   // Vergangene Abfahrten haben endgültige Verspätungen → in die Statistik
-  const isFinal = (d, now) => d.cancelled ? d.planned < now : (d.planned + (d.delayMin || 0) * 60e3) < now - 2 * 60e3;
+  // nur die letzten 3 Stunden – ältere Echtzeitdaten sind oft nicht mehr verlässlich
+  const isFinal = (d, now) => d.planned > now - 3 * 3600e3 && (d.cancelled ? d.planned < now : (d.planned + (d.delayMin || 0) * 60e3) < now - 2 * 60e3);
 
   function record(deps) {
     const now = Date.now();
@@ -209,7 +208,9 @@
       const r = await fetch(cfg.remote, { cache: 'no-cache' });
       if (!r.ok) throw new Error(r.status);
       const j = await r.json();
-      remote = { generated: j.generated, lines: j.lines || {}, stops: j.stops || [], fetched: Date.now() };
+      const lines = j.lines || {};
+      for (const k of Object.keys(lines)) if (k.split('|').length < 3) delete lines[k];
+      remote = { generated: j.generated, lines, fetched: Date.now() };
       store.set('pk.remote', remote);
     } catch (e) { console.warn('Server-Statistik nicht ladbar', e); }
   }
@@ -561,7 +562,7 @@
         const deps = depsBy.get(l.origin?.id) || [];
         // Statistik dieser Linie: Verlauf (Handy + Server) + letzte 90 Min. an dieser Haltestelle
         const recent = aggFromDeps(deps.filter((d) => d.line.key === line.key))[line.key];
-        let agg = S.mergeAgg(merged[line.key] || null, recent || null);
+        let agg = S.mergeAgg(merged[line.key] || null, recent || null) || S.newAgg(line.key, line.label, line.product, line.agency);
         let basis = 'Linie';
         let n = S.summary(agg).tot;
         if (n < 15) {

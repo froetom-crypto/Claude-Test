@@ -11,15 +11,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Rohdaten (Diagnose)
-        run: |
-          for ID in 'de-DELFI_de:05315:11201' 'de-DELFI_de:05315:11111:1:11' 'de-DELFI_de:09162:2'; do
-          curl -sS -G "https://api.transitous.org/api/v1/stoptimes" --data-urlencode "stopId=$ID" --data-urlencode "n=60" --data-urlencode "time=$(date -u -d '-30 min' +%FT%TZ)" | python3 -c "
-          import json,sys,collections
-          d=json.load(sys.stdin); c=collections.Counter()
-          for s in d.get('stopTimes',[]): c[(s.get('mode'),s.get('routeShortName'),s.get('agencyName'),s.get('agencyId'),(s.get('routeId') or '')[:40],s.get('tripId','')[:30])]+=1
-          [print(k,v) for k,v in sorted(c.items(),key=str)[:60]]"
-          echo ----; done
       - name: Sammler gegen Live-API (Probelauf, nichts wird gespeichert)
         run: node collector/collect.mjs /tmp/stats.json && node -e "const s=require('/tmp/stats.json');const S=require('./stats.js');for(const a of Object.values(s.lines).sort((x,y)=>S.summary(y).tot-S.summary(x).tot).slice(0,25)){const m=S.summary(a);console.log(a.product,a.name,a.agency,'n='+m.tot,'puenktlich='+(m.punct*100).toFixed(0)+'%','ausfall='+(m.cancel*100).toFixed(1)+'%')}"
       - name: App im echten Browser mit Live-Daten
