@@ -6,9 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
 concurrency:
   group: pages
@@ -17,20 +15,22 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/configure-pages@v5
-        with:
-          enablement: true
-      - name: Nur die App-Dateien veröffentlichen
+      - name: App-Dateien auf den Branch gh-pages legen (GitHub Pages veröffentlicht ihn)
         run: |
-          mkdir -p site
+          mkdir site
           cp index.html styles.css stats.js app.js sw.js manifest.webmanifest icon.svg site/
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: site
-      - id: deployment
-        uses: actions/deploy-pages@v4
+          touch site/.nojekyll
+          cd site
+          git init -q -b gh-pages
+          git config user.name "pages-bot"
+          git config user.email "pages-bot@users.noreply.github.com"
+          git add -A
+          git commit -qm "Webseite $(date -u +%FT%TZ)"
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" HEAD:gh-pages
+      - name: Live-Seite und Statistik prüfen
+        run: |
+          sleep 60
+          curl -sS -o /dev/null -w "Webseite: %{http_code}\n" https://froetom-crypto.github.io/Claude-Test/
+          curl -sS -o /dev/null -w "Statistik: %{http_code}\n" https://raw.githubusercontent.com/froetom-crypto/Claude-Test/stats-data/stats.json
