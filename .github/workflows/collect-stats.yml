@@ -15,7 +15,7 @@ concurrency:
 jobs:
   collect:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 14
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -24,7 +24,7 @@ jobs:
       - name: Bisherige Statistik holen
         run: |
           mkdir -p out
-          if git fetch -q origin stats-data; then git show FETCH_HEAD:stats.json > out/stats.json || true; fi
+          if git fetch -q origin stats-data; then git show FETCH_HEAD:stats.json > out/stats.json || true; git show FETCH_HEAD:state.json > out/state.json || true; fi
       - name: Sammeln
         run: node collector/collect.mjs out/stats.json
       - name: Speichern (ein einziger Commit, alte Stände werden ersetzt)
@@ -33,6 +33,6 @@ jobs:
           git init -q -b stats-data
           git config user.name "stats-bot"
           git config user.email "stats-bot@users.noreply.github.com"
-          git add stats.json
+          git add stats.json state.json
           git commit -qm "Statistik $(date -u +%FT%TZ)"
           git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" HEAD:stats-data

@@ -1,7 +1,14 @@
 [
-  "Köln Neumarkt", "Köln Heumarkt", "Köln Appellhofplatz", "Köln Friesenplatz",
-  "Köln Rudolfplatz", "Köln Barbarossaplatz", "Köln Zülpicher Platz", "Köln Ebertplatz",
-  "Köln Hbf", "Köln Bf Deutz/LANXESS arena", "Köln Poststr.", "Köln Chlodwigplatz",
-  "Köln Wiener Platz", "Köln Universitätsstr.", "Köln Ehrenfeld Bf", "Köln Kalk Post",
-  "Köln Dom/Hbf", "Köln Sülzgürtel", "Köln Weiden Zentrum", "Köln Porz Markt"
+  "Köln Hbf", "Köln Neumarkt", "Köln Heumarkt", "Köln Appellhofplatz", "Köln Friesenplatz",
+  "Köln Barbarossaplatz", "Köln Ebertplatz", "Köln Bf Deutz/LANXESS arena", "Köln Wiener Platz", "Köln Ehrenfeld Bf",
+  "Bonn Hbf", "Düsseldorf Hbf", "Düsseldorf Heinrich-Heine-Allee", "Duisburg Hbf", "Essen Hbf",
+  "Dortmund Hbf", "Bochum Hbf", "Münster Hbf", "Aachen Hbf", "Wuppertal Hbf",
+  "Berlin Hbf", "Berlin Alexanderplatz", "Berlin Friedrichstraße", "Berlin Zoologischer Garten",
+  "Hamburg Hbf", "Hamburg Jungfernstieg", "Hamburg Dammtor",
+  "München Hbf", "München Marienplatz", "München Karlsplatz (Stachus)",
+  "Frankfurt (Main) Hbf", "Frankfurt Hauptwache", "Frankfurt Konstablerwache",
+  "Stuttgart Hbf", "Stuttgart Charlottenplatz",
+  "Hannover Hbf", "Hannover Kröpcke", "Leipzig Hbf", "Dresden Hbf", "Dresden Postplatz",
+  "Nürnberg Hbf", "Nürnberg Plärrer", "Bremen Hbf", "Karlsruhe Hbf", "Karlsruhe Marktplatz",
+  "Mannheim Hbf", "Freiburg (Breisgau) Hbf", "Augsburg Hbf", "Kiel Hbf", "Rostock Hbf"
 ]

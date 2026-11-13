@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#1a1a19">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Pünktlich">
-  <title>Pünktlich Köln</title>
+  <title>Pünktlich Deutschland</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon.svg">
@@ -14,7 +14,7 @@
 </head>
 <body>
   <header class="top">
-    <h1>Pünktlich Köln</h1>
+    <h1>Pünktlich</h1>
     <span id="net" class="net" aria-live="polite"></span>
   </header>
 
@@ -57,7 +57,7 @@
           <label class="field"><span>Fußweg bis zur Haltestelle (Minuten)</span>
             <input id="walk" type="number" min="0" max="60" value="0" inputmode="numeric">
           </label>
-          <label class="check"><input type="checkbox" id="only-local" checked> Nur Bahn, Bus und S-Bahn (kein Fernverkehr)</label>
+          <label class="check"><input type="checkbox" id="only-local"> Nur Nahverkehr (ohne ICE/IC)</label>
         </details>
         <button class="primary" type="submit">Wann muss ich los?</button>
       </form>
@@ -69,7 +69,7 @@
       <div class="card">
         <label class="field">
           <span>Haltestelle</span>
-          <input id="stop-q" type="text" placeholder="z. B. Neumarkt" autocomplete="off">
+          <input id="stop-q" type="text" placeholder="z. B. Köln Neumarkt, Hamburg Hbf" autocomplete="off">
           <ul class="suggest" id="stop-suggest" role="listbox"></ul>
         </label>
         <div class="chips" id="fav-chips"></div>
@@ -81,7 +81,7 @@
     <section id="tab-lines" class="tab" aria-label="Linien">
       <div class="card">
         <label class="field"><span>Linie suchen</span>
-          <input id="line-q" type="search" placeholder="z. B. 7, 18, 136" inputmode="search">
+          <input id="line-q" type="search" placeholder="Linie oder Verkehrsbetrieb, z. B. 7, S1, KVB, Hamburg" inputmode="search">
         </label>
         <div class="seg" role="tablist" id="line-src">
           <button data-src="all" class="on">Alle Daten</button>

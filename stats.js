@@ -16,9 +16,9 @@
 
   const zeros = (n) => new Array(n).fill(0);
 
-  function newAgg(key, name, product) {
+  function newAgg(key, name, product, agency) {
     return {
-      key, name, product,
+      key, name, product, agency: agency || '',
       hist: zeros(HB), cx: 0, nort: 0,
       hours: Array.from({ length: 24 }, () => zeros(CB)),
       wd: Array.from({ length: 7 }, () => zeros(CB)),
@@ -70,7 +70,7 @@
   function addArr(a, b) { for (let i = 0; i < b.length; i++) a[i] = (a[i] || 0) + (b[i] || 0); return a; }
 
   function mergeAgg(a, b) {
-    const out = newAgg(a ? a.key : b.key, (a || b).name, (a || b).product);
+    const out = newAgg(a ? a.key : b.key, (a || b).name, (a || b).product, (a || b).agency);
     for (const x of [a, b]) {
       if (!x) continue;
       addArr(out.hist, x.hist); out.cx += x.cx || 0; out.nort += x.nort || 0;
