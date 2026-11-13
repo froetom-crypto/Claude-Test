@@ -687,7 +687,7 @@
     const lines = allLines(lineSrc);
     const meta = [];
     meta.push(`Dieses Handy: ${Object.keys(local).length} Linien`);
-    meta.push(remote ? `Server-Statistik: ${Object.keys(remote.lines).length} Linien, Stand ${new Date(remote.generated).toLocaleString('de-DE')}` : 'Keine Server-Statistik eingerichtet (siehe „Mehr“)');
+    meta.push(remote ? `Server-Statistik: ${Object.keys(remote.lines).length} Linien, Stand ${new Date(remote.generated).toLocaleString('de-DE')}` : cfg.remote ? 'Server-Statistik noch nicht erreichbar (Repository öffentlich?)' : 'Keine Server-Statistik eingerichtet (siehe „Mehr“)');
     $('#lines-meta').textContent = meta.join(' · ');
     const out = $('#lines-out');
     if (openKey && lines[openKey]) {
