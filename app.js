@@ -789,7 +789,7 @@
   const citiesOfAgg = (a) => S.topCities(a, 3);
   const prodGroup = (p) => (p === 'regionalExpress' ? 'regional' : p === 'nationalExpress' ? 'national' : p);
   const FILTERS = ['line-sort', 'f-city', 'line-prod', 'f-punct', 'f-cancel', 'f-min'];
-  const FDEF = { 'line-sort': 'tot_desc', 'f-city': '', 'line-prod': '', 'f-punct': '', 'f-cancel': '', 'f-min': '1' };
+  const FDEF = { 'line-sort': 'tot_desc', 'f-city': '', 'line-prod': '', 'f-punct': '', 'f-cancel': '', 'f-min': '10' };
   function initLines() {
     const saved = store.get('pk.filters', {});
     lineView = saved.view || 'agencies';
@@ -871,7 +871,11 @@
     const citySel = $('#f-city');
     const cur = citySel.value || pendingCity; pendingCity = '';
     const cityCount = {};
-    for (const a of Object.values(all)) for (const [c, n] of Object.entries(a.cities || {})) cityCount[c] = (cityCount[c] || 0) + n;
+    for (const a of Object.values(all)) {
+      const own = Object.entries(a.cities || {});
+      if (own.length) for (const [c, n] of own) cityCount[c] = (cityCount[c] || 0) + n;
+      else { const g = S.cityFromName(a.agency); if (g) cityCount[g] = (cityCount[g] || 0) + S.summary(a).tot; }
+    }
     const cityList = Object.keys(cityCount).sort((x, y) => x.localeCompare(y, 'de'));
     citySel.innerHTML = '<option value="">Alle Städte</option>' + cityList.map((c) => `<option value="${esc(c)}">${esc(c)} (${cityCount[c]})</option>`).join('');
     citySel.value = cityList.includes(cur) ? cur : '';
@@ -887,7 +891,7 @@
     if (f.prod) chips.push(['line-prod', productName(f.prod)]);
     if (f.punct) chips.push(['f-punct', 'Pünktlichkeit: ' + $('#f-punct').selectedOptions[0].text]);
     if (f.cancel !== '') chips.push(['f-cancel', 'Ausfälle: ' + $('#f-cancel').selectedOptions[0].text]);
-    if (f.min > 1) chips.push(['f-min', `ab ${f.min} Fahrten`]);
+    if (f.min !== 10) chips.push(['f-min', f.min > 1 ? `ab ${f.min} Fahrten` : 'auch Linien mit wenigen Fahrten']);
     $('#active-filters').innerHTML = chips.map(([k, t]) => `<button class="chip" data-clear="${k}">${esc(t)} ✕</button>`).join('');
 
     const out = $('#lines-out');
@@ -903,7 +907,7 @@
     // Basismenge: Linien nach Verkehrsmittel, Stadt, Betrieb
     const lines = Object.values(all).filter((a) => (!f.prod || prodGroup(a.product) === f.prod)
       && (!agencyFilter || agencyOf(a) === agencyFilter)
-      && (!f.city || (a.cities && a.cities[f.city])));
+      && (!f.city || (a.cities && a.cities[f.city]) || (!Object.keys(a.cities || {}).length && S.cityFromName(a.agency) === f.city)));
     const empty = `<div class="card"><p>Nichts gefunden.</p><p class="muted small">Filter lockern (oben „Filter zurücksetzen“) oder anders suchen. Die Statistik wächst automatisch – der Hintergrund-Sammler wertet große Knoten in ganz Deutschland aus, und jede deiner Abfragen kommt dazu.</p></div>`;
     const qHit = (...vals) => !f.q || vals.some((v) => String(v || '').toLowerCase().includes(f.q));
 

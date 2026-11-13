@@ -172,9 +172,29 @@
     }
     return best;
   }
-  /** häufigste Städte eines Aggregats */
+  /** Stadt aus dem Namen eines Verkehrsbetriebs ableiten ("Stadtwerke Bonn", "Leipziger Verkehrsbetriebe", "MVG" ...) */
+  const ABBR = { KVB: 'Köln', BVG: 'Berlin', MVG: 'München', HVV: 'Hamburg', VGF: 'Frankfurt am Main', SSB: 'Stuttgart', LVB: 'Leipzig',
+    DVB: 'Dresden', VAG: 'Nürnberg', BSAG: 'Bremen', ÜSTRA: 'Hannover', RSAG: 'Rostock', KVG: 'Kiel', KVV: 'Karlsruhe', ASEAG: 'Aachen',
+    DSW21: 'Dortmund', DVG: 'Duisburg', EVAG: 'Essen', WSW: 'Wuppertal', SWB: 'Bonn', RNV: 'Mannheim', HEAG: 'Darmstadt', ESWE: 'Wiesbaden',
+    MVV: 'München', VBK: 'Karlsruhe', SWM: 'München', HOCHBAHN: 'Hamburg', VHH: 'Hamburg', RHEINBAHN: 'Düsseldorf', BOGESTRA: 'Bochum' };
+  function cityFromName(name) {
+    if (!name) return '';
+    const up = name.toUpperCase();
+    for (const [k, v] of Object.entries(ABBR)) if (new RegExp('(^|[^A-ZÄÖÜ])' + k + '([^A-ZÄÖÜ]|$)').test(up)) return v;
+    const low = name.toLowerCase();
+    for (const [n] of CITIES) {
+      const base = n.split(/[ (]/)[0].toLowerCase();
+      const stem = base.length > 5 ? base.slice(0, 5) : base;  // "Münch" trifft München/Münchner, "Leipz" Leipziger
+      if (new RegExp('(^|[^a-zäöüß])' + stem.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).test(low)) return n;
+    }
+    return '';
+  }
+  /** häufigste Städte eines Aggregats (mit Rückfall auf den Betriebsnamen) */
   function topCities(agg, k = 2) {
-    return Object.entries(agg.cities || {}).sort((x, y) => y[1] - x[1]).slice(0, k).map((x) => x[0]);
+    const c = Object.entries(agg.cities || {}).sort((x, y) => y[1] - x[1]).slice(0, k).map((x) => x[0]);
+    if (c.length) return c;
+    const g = cityFromName(agg.agency);
+    return g ? [g] : [];
   }
 
   /** Einheitliche Liniennamen für App und Sammler: { name, product } */
@@ -198,7 +218,7 @@
     return { name, product };
   }
 
-  const api = { cityOf, topCities, normLineName, newAgg, addObs, mergeAgg, mergeMaps, summary, coarsePunct, pruneDays, berlin, HB, CB };
+  const api = { cityOf, cityFromName, topCities, normLineName, newAgg, addObs, mergeAgg, mergeMaps, summary, coarsePunct, pruneDays, berlin, HB, CB };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.PStats = api;
 })(typeof self !== 'undefined' ? self : this);
