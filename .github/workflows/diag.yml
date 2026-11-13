@@ -3,27 +3,23 @@ on:
   push:
     branches: [ccr-a176c7b3-u1epln]
 jobs:
-  diag:
+  e2e:
     runs-on: ubuntu-latest
     steps:
-      - run: |
-          set +e
-          ID='de-DELFI_de:05315:11111:1:11'
-          P=$(date -u -d '-60 min' +%Y-%m-%dT%H:%M:%SZ)
-          for v in v1 v2 v3 v4 v5; do
-            echo "=== stoptimes $v"; curl -sS -m 25 -G "https://api.transitous.org/api/$v/stoptimes" --data-urlencode "stopId=$ID" --data-urlencode "n=40" --data-urlencode "time=$P" -o st_$v.json -w '%{http_code}\n'; head -c 2500 st_$v.json; echo
-            python3 - st_$v.json <<'PY'
-          import json,sys
-          try:
-            d=json.load(open(sys.argv[1])); st=d.get('stopTimes',[])
-            print('count',len(st),'keys',list(d.keys()))
-            for s in st[:40]:
-              p=s.get('place',{})
-              print(s.get('routeShortName'),s.get('mode'),s.get('realTime'),s.get('cancelled'),p.get('scheduledDeparture'),p.get('departure'),s.get('agencyName'),s.get('headsign'))
-          except Exception as e: print('ERR',e)
-          PY
-          done
-          F='50.9357,6.9477'; T='50.9601,6.9574'
-          A=$(date -u -d '+60 min' +%Y-%m-%dT%H:%M:%SZ)
-          for v in v1 v2 v3 v4 v5; do echo "=== plan $v"; curl -sS -m 30 -G "https://api.transitous.org/api/$v/plan" --data-urlencode "fromPlace=$ID" --data-urlencode "toPlace=$T" --data-urlencode "time=$A" --data-urlencode "arriveBy=true" -w '\n%{http_code}\n' | head -c 3500; echo; done
-          echo "=== EFA DM realtime"; curl -sS -m 25 "https://efa.vrr.de/standard/XML_DM_REQUEST?outputFormat=rapidJSON&type_dm=stop&name_dm=de:05315:11111&mode=direct&useRealtime=1&limit=5&itdDateTimeDepArr=dep" | head -c 3000
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Sammler gegen Live-API (Probelauf, nichts wird gespeichert)
+        run: node collector/collect.mjs /tmp/stats.json && node -e "const s=require('/tmp/stats.json');const S=require('./stats.js');for(const a of Object.values(s.lines).sort((x,y)=>S.summary(y).tot-S.summary(x).tot).slice(0,15)){const m=S.summary(a);console.log(a.product,a.name,'n='+m.tot,'puenktlich='+(m.punct*100).toFixed(0)+'%','ausfall='+(m.cancel*100).toFixed(1)+'%')}"
+      - name: App im echten Browser mit Live-Daten
+        run: |
+          npm i --no-save --silent playwright-core@1.48.2
+          python3 -m http.server 8080 >/dev/null 2>&1 &
+          sleep 1
+          node .github/e2e/e2e.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshots
+          path: '*.png'
