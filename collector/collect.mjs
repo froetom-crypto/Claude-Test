@@ -56,38 +56,43 @@ for (const name of names) {
 }
 
 let added = 0;
+const WINDOW = 60 * 60e3;   // je Abfrage eine Stunde
+const LOOKBACK = 3 * 3600e3; // fällt ein Lauf aus, holt der nächste bis zu 3 Std. nach
 for (const st of state.stops) {
-  const from = Math.max(st.lastEnd || 0, now - 90 * 60e3);
+  const from = Math.max(st.lastEnd || 0, now - LOOKBACK);
   const to = now - 20 * 60e3;                // erst nach 20 Min. ist die Verspätung endgültig
   if (to - from < 5 * 60e3) continue;
-  try {
-    // ab 15 Min. vor dem Fenster abfragen, weil die Liste nach tatsächlicher Abfahrt sortiert ist
-    const res = await get('/api/v1/stoptimes', { stopId: st.id, time: new Date(from).toISOString(), n: 300 });
-    for (const s of res.stopTimes || []) {
-      const pl = s.place || {};
-      let product = MODE[s.mode];
-      if (!product || (s.tripTo && s.tripTo.stopId === pl.stopId)) continue;
-      const planned = Date.parse(pl.scheduledDeparture);
-      if (!(planned >= from && planned < to)) continue;
-      const id = `${s.tripId}|${String(pl.stopId).replace(/:\d+:\d+$/, '')}`;
-      if (state.seen[id]) continue;
-      state.seen[id] = now;
-      const agency = String(s.agencyName || '').trim();
-      const nl = S.normLineName(s.routeShortName || s.displayName, product);
-      product = nl.product;
-      const name = nl.name, key = `${product}|${name}|${agency}`;
-      const agg = state.lines[key] ||= S.newAgg(key, name, product, agency);
-      const cancelled = !!(s.cancelled || s.tripCancelled || pl.cancelled);
-      const delayMin = s.realTime && pl.departure ? (Date.parse(pl.departure) - planned) / 60e3 : null;
-      S.addObs(agg, { planned, cancelled, delayMin });
-      added++;
-    }
-    st.lastEnd = to;
-  } catch (e) { console.warn(st.name, e.message); }
-  await sleep(300);
+  let ok = true;
+  for (let w = from; w < to; w += WINDOW) {
+    const wEnd = Math.min(w + WINDOW, to);
+    try {
+      const res = await get('/api/v1/stoptimes', { stopId: st.id, time: new Date(w).toISOString(), n: 300 });
+      for (const s of res.stopTimes || []) {
+        const pl = s.place || {};
+        let product = MODE[s.mode];
+        if (!product || (s.tripTo && s.tripTo.stopId === pl.stopId)) continue;
+        const planned = Date.parse(pl.scheduledDeparture);
+        if (!(planned >= w && planned < wEnd)) continue;
+        const id = `${s.tripId}|${String(pl.stopId).replace(/:\d+:\d+$/, '')}`;
+        if (state.seen[id]) continue;
+        state.seen[id] = now;
+        const agency = String(s.agencyName || '').trim();
+        const nl = S.normLineName(s.routeShortName || s.displayName, product);
+        product = nl.product;
+        const name = nl.name, key = `${product}|${name}|${agency}`;
+        const agg = state.lines[key] ||= S.newAgg(key, name, product, agency);
+        const cancelled = !!(s.cancelled || s.tripCancelled || pl.cancelled);
+        const delayMin = s.realTime && pl.departure ? (Date.parse(pl.departure) - planned) / 60e3 : null;
+        S.addObs(agg, { planned, cancelled, delayMin });
+        added++;
+      }
+    } catch (e) { console.warn(st.name, e.message); ok = false; break; }
+    await sleep(300);
+  }
+  if (ok) st.lastEnd = to;
 }
 
-for (const [k, t] of Object.entries(state.seen)) if (now - t > 6 * 3600e3) delete state.seen[k];
+for (const [k, t] of Object.entries(state.seen)) if (now - t > 8 * 3600e3) delete state.seen[k];
 for (const a of Object.values(state.lines)) S.pruneDays(a, now);
 state.generated = new Date(now).toISOString();
 // öffentliche Statistik (lädt die App) und interner Zustand (Dedupe, Haltestellen) getrennt
