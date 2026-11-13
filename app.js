@@ -123,7 +123,7 @@
       id: `${s.tripId || line.key + '@' + planned}|${stationOf(pl.stopId)}`,
       tripId: s.tripId, line, direction: s.headsign || s.tripTo?.name || '', planned, when: cancelled ? null : when,
       delayMin: s.realTime && when ? (when - planned) / 60e3 : null, cancelled,
-      platform: pl.track || pl.scheduledTrack || '', stopId: pl.stopId, stopName: pl.name,
+      platform: pl.track || pl.scheduledTrack || '', stopId: pl.stopId, stopName: pl.name, city: S.cityOf(pl.lat, pl.lon),
       ends: !!(s.tripTo && s.tripTo.stopId === pl.stopId),
     };
   }
@@ -182,7 +182,7 @@
       if (!isFinal(d, now) || seen[d.id]) continue;
       seen[d.id] = now;
       const a = local[d.line.key] || (local[d.line.key] = S.newAgg(d.line.key, d.line.label, d.line.product, d.line.agency));
-      S.addObs(a, { planned: d.planned, delayMin: d.delayMin, cancelled: d.cancelled });
+      S.addObs(a, { planned: d.planned, delayMin: d.delayMin, cancelled: d.cancelled, city: d.city });
       added++;
     }
     if (added) {
@@ -198,7 +198,7 @@
     for (const d of deps) {
       if (!isFinal(d, now)) continue;
       const a = out[d.line.key] || (out[d.line.key] = S.newAgg(d.line.key, d.line.label, d.line.product, d.line.agency));
-      S.addObs(a, { planned: d.planned, delayMin: d.delayMin, cancelled: d.cancelled });
+      S.addObs(a, { planned: d.planned, delayMin: d.delayMin, cancelled: d.cancelled, city: d.city });
     }
     return out;
   }
@@ -785,80 +785,174 @@
   // ---------- LINIEN ----------
   let lineSrc = 'all', openKey = null, lineView = 'agencies', agencyFilter = null;
   const agencyOf = (a) => a.agency || 'Unbekannter Betrieb';
+  const cityOfAgg = (a) => S.topCities(a, 1)[0] || '';
+  const citiesOfAgg = (a) => S.topCities(a, 3);
   const prodGroup = (p) => (p === 'regionalExpress' ? 'regional' : p === 'nationalExpress' ? 'national' : p);
+  const FILTERS = ['line-sort', 'f-city', 'line-prod', 'f-punct', 'f-cancel', 'f-min'];
+  const FDEF = { 'line-sort': 'tot_desc', 'f-city': '', 'line-prod': '', 'f-punct': '', 'f-cancel': '', 'f-min': '10' };
   function initLines() {
+    const saved = store.get('pk.filters', {});
+    lineView = saved.view || 'agencies';
+    for (const id of FILTERS) {
+      const el = $('#' + id);
+      if (saved[id] != null && id !== 'f-city') el.value = saved[id];
+      el.addEventListener('change', () => { openKey = null; saveFilters(); renderLines(); });
+    }
+    pendingCity = saved['f-city'] || '';
     $('#line-q').addEventListener('input', () => { openKey = null; renderLines(); });
-    $('#line-sort').addEventListener('change', renderLines);
-    $('#line-prod').addEventListener('change', renderLines);
     $('#line-src').addEventListener('click', (e) => {
       const b = e.target.closest('button'); if (!b) return;
       lineSrc = b.dataset.src; $$('#line-src button').forEach((x) => x.classList.toggle('on', x === b)); renderLines();
     });
     $('#line-view').addEventListener('click', (e) => {
       const b = e.target.closest('button'); if (!b) return;
-      setView(b.dataset.view); renderLines();
+      setView(b.dataset.view); saveFilters(); renderLines();
     });
-    $('#agency-filter').addEventListener('click', () => { agencyFilter = null; renderLines(); });
+    $('#active-filters').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-clear]'); if (!b) return;
+      const k = b.dataset.clear;
+      if (k === 'agency') agencyFilter = null;
+      else if (k === 'q') $('#line-q').value = '';
+      else $('#' + k).value = FDEF[k];
+      saveFilters(); renderLines();
+    });
+    $('#f-reset').addEventListener('click', () => {
+      for (const id of FILTERS) $('#' + id).value = FDEF[id];
+      agencyFilter = null; $('#line-q').value = ''; saveFilters(); renderLines();
+    });
+    setView(lineView);
+  }
+  let pendingCity = '';
+  function saveFilters() {
+    const o = { view: lineView };
+    for (const id of FILTERS) o[id] = $('#' + id).value;
+    store.set('pk.filters', o);
   }
   function setView(v) { lineView = v; openKey = null; $$('#line-view button').forEach((x) => x.classList.toggle('on', x.dataset.view === v)); }
   function openLine(key) { openKey = key; renderLines(); scrollTo(0, 0); }
-  function sortRows(rows, how, nameOf) {
-    const by = {
-      tot: (x, y) => y.s.tot - x.s.tot,
-      worst: (x, y) => (x.s.punct ?? 1) - (y.s.punct ?? 1) || y.s.tot - x.s.tot,
-      best: (x, y) => (y.s.punct ?? 0) - (x.s.punct ?? 0) || y.s.tot - x.s.tot,
-      name: (x, y) => nameOf(x).localeCompare(nameOf(y), 'de', { numeric: true }),
-    }[how];
-    return rows.sort(by);
+  function sortRows(rows, how, nameOf, cityOf) {
+    const [k, dir] = how.split('_');
+    const sign = dir === 'asc' ? 1 : -1;
+    const val = (r) => (k === 'tot' ? r.s.tot : k === 'punct' ? r.s.punct : k === 'cancel' ? r.s.cancel : k === 'mean' ? r.s.mean : k === 'late5' ? r.s.late5 : null);
+    return rows.sort((x, y) => {
+      if (k === 'name') return sign * nameOf(x).localeCompare(nameOf(y), 'de', { numeric: true });
+      if (k === 'city') return (cityOf(x) || 'zzz').localeCompare(cityOf(y) || 'zzz', 'de') || nameOf(x).localeCompare(nameOf(y), 'de', { numeric: true });
+      const a = val(x), b = val(y);
+      if (a == null && b == null) return 0; if (a == null) return 1; if (b == null) return -1;
+      return sign * (a - b) || y.s.tot - x.s.tot;
+    });
   }
+  function passes(s, f) {
+    if (s.tot < f.min) return false;
+    if (f.punct) {
+      const p = (s.punct ?? 0) * 100;
+      if (f.punct === '95' && p < 95) return false;
+      if (f.punct === '90' && p < 90) return false;
+      if (f.punct === '80-90' && (p < 80 || p >= 90)) return false;
+      if (f.punct === '-80' && p >= 80) return false;
+      if (f.punct === '-65' && p >= 65) return false;
+    }
+    if (f.cancel !== '') {
+      const c = (s.cancel ?? 0) * 100;
+      if (f.cancel === '0' ? c > 0 : c <= Number(f.cancel)) return false;
+    }
+    return true;
+  }
+  const statCells = (s, withMean = true) => `<td><span class="status ${level(s.punct).cls}">${pct(s.punct)}</span></td><td>${pct(s.cancel, 1)}</td>${withMean ? `<td>${num(s.mean)}</td>` : ''}<td>${s.tot}</td>`;
+
   function renderLines() {
     const all = allLines(lineSrc);
     const meta = [];
     meta.push(`Dieses Handy: ${Object.keys(local).length} Linien`);
     meta.push(remote ? `Server-Statistik: ${Object.keys(remote.lines).length} Linien, Stand ${new Date(remote.generated).toLocaleString('de-DE')}` : cfg.remote ? 'Server-Statistik noch nicht erreichbar' : 'Keine Server-Statistik eingerichtet (siehe „Mehr“)');
     $('#lines-meta').textContent = meta.join(' · ');
-    $('#agency-filter').innerHTML = agencyFilter ? `<button class="chip">Betrieb: ${esc(agencyFilter)} ✕</button>` : '';
+
+    // Städte-Auswahl aus den vorhandenen Daten füllen
+    const citySel = $('#f-city');
+    const cur = citySel.value || pendingCity; pendingCity = '';
+    const cityCount = {};
+    for (const a of Object.values(all)) {
+      const own = Object.entries(a.cities || {});
+      if (own.length) for (const [c, n] of own) cityCount[c] = (cityCount[c] || 0) + n;
+      else { const g = S.cityFromName(a.agency); if (g) cityCount[g] = (cityCount[g] || 0) + S.summary(a).tot; }
+    }
+    const cityList = Object.keys(cityCount).sort((x, y) => x.localeCompare(y, 'de'));
+    citySel.innerHTML = '<option value="">Alle Städte</option>' + cityList.map((c) => `<option value="${esc(c)}">${esc(c)} (${cityCount[c]})</option>`).join('');
+    citySel.value = cityList.includes(cur) ? cur : '';
+
+    const f = { q: $('#line-q').value.trim().toLowerCase(), city: citySel.value, prod: $('#line-prod').value, punct: $('#f-punct').value,
+      cancel: $('#f-cancel').value, min: Number($('#f-min').value) || 1, how: $('#line-sort').value };
+
+    // aktive Filter als antippbare Chips
+    const chips = [];
+    if (agencyFilter) chips.push(['agency', 'Betrieb: ' + agencyFilter]);
+    if (f.q) chips.push(['q', 'Suche: ' + f.q]);
+    if (f.city) chips.push(['f-city', 'Stadt: ' + f.city]);
+    if (f.prod) chips.push(['line-prod', productName(f.prod)]);
+    if (f.punct) chips.push(['f-punct', 'Pünktlichkeit: ' + $('#f-punct').selectedOptions[0].text]);
+    if (f.cancel !== '') chips.push(['f-cancel', 'Ausfälle: ' + $('#f-cancel').selectedOptions[0].text]);
+    if (f.min !== 10) chips.push(['f-min', f.min > 1 ? `ab ${f.min} Fahrten` : 'auch Linien mit wenigen Fahrten']);
+    $('#active-filters').innerHTML = chips.map(([k, t]) => `<button class="chip" data-clear="${k}">${esc(t)} ✕</button>`).join('');
+
     const out = $('#lines-out');
     if (openKey && all[openKey]) {
       const a = all[openKey];
+      const cities = citiesOfAgg(a);
       out.innerHTML = `<button id="back" style="margin-bottom:12px">← Zurück</button>` +
-        lineProfileHTML(a, lineTitle(a), { sub: agencyOf(a) + ' · ' + (lineSrc === 'local' ? 'Nur auf diesem Handy beobachtete Fahrten' : lineSrc === 'remote' ? 'Server-Statistik' : 'Handy + Server-Statistik') });
+        lineProfileHTML(a, lineTitle(a), { sub: agencyOf(a) + (cities.length ? ' · ' + cities.join(', ') : '') + ' · ' + (lineSrc === 'local' ? 'Nur auf diesem Handy beobachtete Fahrten' : lineSrc === 'remote' ? 'Server-Statistik' : 'Handy + Server-Statistik') });
       $('#back').onclick = () => { openKey = null; renderLines(); };
       return;
     }
-    const q = $('#line-q').value.trim().toLowerCase();
-    const prod = $('#line-prod').value, how = $('#line-sort').value;
-    const lines = Object.values(all).filter((a) => (!prod || prodGroup(a.product) === prod) && (!agencyFilter || agencyOf(a) === agencyFilter));
-    const empty = `<div class="card"><p>Noch keine Statistik${q ? ' zu dieser Suche' : ''}.</p><p class="muted small">Sie wächst automatisch: Der Hintergrund-Sammler wertet alle 15 Minuten große Knoten in ganz Deutschland aus, und jede deiner Abfragen kommt dazu.</p></div>`;
+
+    // Basismenge: Linien nach Verkehrsmittel, Stadt, Betrieb
+    const lines = Object.values(all).filter((a) => (!f.prod || prodGroup(a.product) === f.prod)
+      && (!agencyFilter || agencyOf(a) === agencyFilter)
+      && (!f.city || (a.cities && a.cities[f.city]) || (!Object.keys(a.cities || {}).length && S.cityFromName(a.agency) === f.city)));
+    const empty = `<div class="card"><p>Nichts gefunden.</p><p class="muted small">Filter lockern (oben „Filter zurücksetzen“) oder anders suchen. Die Statistik wächst automatisch – der Hintergrund-Sammler wertet große Knoten in ganz Deutschland aus, und jede deiner Abfragen kommt dazu.</p></div>`;
+    const qHit = (...vals) => !f.q || vals.some((v) => String(v || '').toLowerCase().includes(f.q));
+
+    const group = (keyOf) => {
+      const g = {};
+      for (const a of lines) {
+        const k = keyOf(a); if (!k) continue;
+        const x = g[k] || (g[k] = { name: k, agg: null, n: 0, prods: new Set(), agencies: new Set() });
+        x.agg = S.mergeAgg(x.agg, a); x.n++; x.prods.add(productName(prodGroup(a.product))); x.agencies.add(agencyOf(a));
+      }
+      return Object.values(g).map((x) => ({ ...x, s: S.summary(x.agg, cfg.thr) }));
+    };
+
+    if (lineView === 'cities' && !agencyFilter) {
+      let rows = group((a) => cityOfAgg(a)).filter((r) => passes(r.s, f) && qHit(r.name, ...r.agencies));
+      if (!rows.length) { out.innerHTML = empty; return; }
+      rows = sortRows(rows, f.how, (r) => r.name, (r) => r.name);
+      out.innerHTML = `<div class="card"><table class="stats"><thead><tr><th>Stadt</th><th>Pünktlich</th><th>Ausfall</th><th>Fahrten</th></tr></thead><tbody>
+        ${rows.map((r) => `<tr class="click" data-city="${esc(r.name)}"><td><b>${esc(r.name)}</b><div class="muted small">${r.agencies.size} Betrieb${r.agencies.size > 1 ? 'e' : ''} · ${r.n} Linien</div></td>${statCells(r.s, false)}</tr>`).join('')}
+        </tbody></table><p class="note">Stadt antippen, um ihre Verkehrsbetriebe zu sehen.</p></div>`;
+      $$('tr.click', out).forEach((tr) => tr.onclick = () => { $('#f-city').value = tr.dataset.city; pendingCity = tr.dataset.city; setView('agencies'); saveFilters(); renderLines(); scrollTo(0, 0); });
+      return;
+    }
 
     if (lineView === 'agencies' && !agencyFilter) {
-      const groups = {};
-      for (const a of lines) {
-        const g = groups[agencyOf(a)] || (groups[agencyOf(a)] = { name: agencyOf(a), agg: null, n: 0, prods: new Set() });
-        g.agg = S.mergeAgg(g.agg, a); g.n++; g.prods.add(productName(prodGroup(a.product)));
-      }
-      let rows = Object.values(groups).map((g) => ({ g, s: S.summary(g.agg, cfg.thr) }))
-        .filter((r) => r.s.tot > 0 && (!q || r.g.name.toLowerCase().includes(q)));
+      let rows = group((a) => agencyOf(a)).map((r) => ({ ...r, city: S.topCities(r.agg, 3) }))
+        .filter((r) => passes(r.s, f) && qHit(r.name, ...r.city));
       if (!rows.length) { out.innerHTML = empty; return; }
-      rows = sortRows(rows, how, (r) => r.g.name);
-      const shown = rows.slice(0, 150);
-      out.innerHTML = `<div class="card"><table class="stats"><thead><tr><th>Verkehrsbetrieb</th><th>Pünktlich</th><th>Ausfall</th><th>Fahrten</th></tr></thead><tbody>
-        ${shown.map((r) => `<tr class="click" data-agency="${esc(r.g.name)}"><td><b>${esc(r.g.name)}</b><div class="muted small">${r.g.n} Linie${r.g.n > 1 ? 'n' : ''} · ${esc([...r.g.prods].join(', '))}</div></td>
-        <td><span class="status ${level(r.s.punct).cls}">${pct(r.s.punct)}</span></td><td>${pct(r.s.cancel, 1)}</td><td>${r.s.tot}</td></tr>`).join('')}
-        </tbody></table><p class="note">${rows.length > shown.length ? `${shown.length} von ${rows.length} Betrieben – oben suchen. ` : ''}Betrieb antippen, um seine Linien zu sehen.</p></div>`;
+      rows = sortRows(rows, f.how, (r) => r.name, (r) => r.city[0]);
+      const shown = rows.slice(0, 200);
+      out.innerHTML = `<div class="card"><p class="muted small" style="margin-top:0">${rows.length} Verkehrsbetrieb${rows.length > 1 ? 'e' : ''}</p><table class="stats"><thead><tr><th>Verkehrsbetrieb</th><th>Pünktlich</th><th>Ausfall</th><th>Fahrten</th></tr></thead><tbody>
+        ${shown.map((r) => `<tr class="click" data-agency="${esc(r.name)}"><td><b>${esc(r.name)}</b><div class="muted small">📍 ${esc(r.city.join(', ') || 'Stadt unbekannt')}</div><div class="muted small">${r.n} Linie${r.n > 1 ? 'n' : ''} · ${esc([...r.prods].join(', '))}</div></td>${statCells(r.s, false)}</tr>`).join('')}
+        </tbody></table><p class="note">${rows.length > shown.length ? `${shown.length} von ${rows.length} – Suche oder Filter nutzen. ` : ''}Betrieb antippen, um seine Linien zu sehen.</p></div>`;
       $$('tr.click', out).forEach((tr) => tr.onclick = () => { agencyFilter = tr.dataset.agency; setView('lines'); renderLines(); scrollTo(0, 0); });
       return;
     }
 
-    let rows = lines.map((a) => ({ a, s: S.summary(a, cfg.thr) }))
-      .filter((r) => r.s.tot > 0 && (!q || r.a.name.toLowerCase() === q || r.a.name.toLowerCase().startsWith(q) || (q.length > 2 && agencyOf(r.a).toLowerCase().includes(q))));
+    let rows = lines.map((a) => ({ a, s: S.summary(a, cfg.thr), cities: citiesOfAgg(a) }))
+      .filter((r) => r.s.tot > 0 && passes(r.s, f) && (!f.q || r.a.name.toLowerCase() === f.q || r.a.name.toLowerCase().startsWith(f.q) || qHit(agencyOf(r.a), ...r.cities) && f.q.length > 2));
     if (!rows.length) { out.innerHTML = empty; return; }
-    rows = sortRows(rows, how, (r) => r.a.name);
-    const shown = rows.slice(0, q || agencyFilter ? 300 : 100);
-    out.innerHTML = `<div class="card"><table class="stats"><thead><tr><th>Linie</th><th>Pünktlich</th><th>Ausfall</th><th>Ø Min.</th><th>Fahrten</th></tr></thead><tbody>
-      ${shown.map((r) => `<tr class="click" data-key="${esc(r.a.key)}"><td><span class="badge">${esc(r.a.name)}</span> <span class="muted small">${productName(r.a.product)}</span>${agencyFilter ? '' : `<div class="muted small">${esc(agencyOf(r.a))}</div>`}</td>
-      <td><span class="status ${level(r.s.punct).cls}">${pct(r.s.punct)}</span></td><td>${pct(r.s.cancel, 1)}</td><td>${num(r.s.mean)}</td><td>${r.s.tot}</td></tr>`).join('')}
-      </tbody></table><p class="note">${rows.length > shown.length ? `${shown.length} von ${rows.length} Linien – oben suchen oder filtern. ` : ''}Antippen für das Zuverlässigkeitsprofil.</p></div>`;
+    rows = sortRows(rows, f.how, (r) => r.a.name, (r) => r.cities[0]);
+    const shown = rows.slice(0, 300);
+    out.innerHTML = `<div class="card"><p class="muted small" style="margin-top:0">${rows.length} Linie${rows.length > 1 ? 'n' : ''}</p><table class="stats"><thead><tr><th>Linie</th><th>Pünktlich</th><th>Ausfall</th><th>Ø Min.</th><th>Fahrten</th></tr></thead><tbody>
+      ${shown.map((r) => `<tr class="click" data-key="${esc(r.a.key)}"><td><span class="badge">${esc(r.a.name)}</span> <span class="muted small">${productName(r.a.product)}</span><div class="muted small">${agencyFilter ? '' : esc(agencyOf(r.a)) + ' · '}📍 ${esc(r.cities.join(', ') || '–')}</div></td>${statCells(r.s)}</tr>`).join('')}
+      </tbody></table><p class="note">${rows.length > shown.length ? `${shown.length} von ${rows.length} – Suche oder Filter nutzen. ` : ''}Antippen für das Zuverlässigkeitsprofil.</p></div>`;
     $$('tr.click', out).forEach((tr) => tr.onclick = () => openLine(tr.dataset.key));
   }
   const order = (p) => ['tram', 'subway', 'bus', 'suburban', 'regional', 'regionalExpress'].indexOf(p) + 1 || 9;

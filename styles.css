@@ -207,3 +207,7 @@ details.opts > summary { color: var(--ink-2); }
 .row.center { justify-content: center; margin-top: 12px; }
 
 .card { scroll-margin-top: 64px; }
+
+table.stats td:not(:first-child), table.stats th:not(:first-child) { white-space: nowrap; }
+table.stats td:first-child { word-break: break-word; }
+.status { white-space: nowrap; }
