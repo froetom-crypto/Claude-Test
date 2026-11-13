@@ -71,7 +71,7 @@
           return await r.json();
         } catch (e) {
           clearTimeout(to);
-          lastErr = e.name === 'AbortError' ? new Error('Zeitüberschreitung bei der Auskunft') : e;
+          lastErr = e.name === 'AbortError' ? new Error('Zeitüberschreitung bei der Auskunft') : e instanceof TypeError ? new Error('Keine Verbindung zur Live-Auskunft (offline, oder diese Ansicht blockiert Internetzugriffe).') : e;
           await new Promise((res) => setTimeout(res, 700));
         }
       }
