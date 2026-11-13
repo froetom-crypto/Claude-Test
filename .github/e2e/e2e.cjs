@@ -25,7 +25,9 @@ const { chromium } = require('playwright-core');
   await page.click('#route-form button.primary');
   await page.waitForSelector('#route-out .hero, #route-out .err, #route-out .card', { timeout: 60000 });
   await page.waitForSelector('#route-out .hero, #route-out .err', { timeout: 60000 }).catch(() => {});
-  console.log('ROUTE:', (await txt('#route-out')).slice(0, 3000));
+  console.log('ROUTE:', (await txt('#route-out')).slice(0, 1800));
+  const cmp = await page.$('#compare [data-mode=regional]'); if (cmp) { await cmp.click(); await page.waitForTimeout(300); console.log('REGIONAL:', (await txt('#route-out')).slice(0, 1200)); } else console.log('KEIN VERGLEICH');
+  await page.click('[data-tab=lines]'); await page.waitForTimeout(300); console.log('BETRIEBE:', (await txt('#lines-out')).slice(0, 800));
   await page.screenshot({ path: 'route.png', fullPage: true });
   // Linien
   await page.click('[data-tab=lines]'); await page.waitForTimeout(500);

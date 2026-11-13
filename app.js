@@ -440,6 +440,11 @@
   const routeOut = $('#route-out');
   let lastQuery = null;
   let routes = store.get('pk.routes', []);
+  let routeMode = store.get('pk.mode', 'all'), lastEvals = null;
+  function setMode(m) {
+    routeMode = m; store.set('pk.mode', m);
+    $$('#mode button').forEach((b) => b.classList.toggle('on', b.dataset.mode === m));
+  }
   const short = (n) => String(n || '').replace(/^Köln[ ,]+/, '');
   function renderRouteFavs() {
     $('#route-favs').innerHTML = routes.map((r, i) => `<button class="chip" data-i="${i}">${esc(short(r.from.name))} → ${esc(short(r.to.name))}<small>an ${esc(r.time || '')} · tippen zum Berechnen</small></button>`).join('');
@@ -473,6 +478,12 @@
       }, (err) => { $('#from').value = ''; alert('Standort nicht verfügbar: ' + err.message); }, { enableHighAccuracy: true, timeout: 10000 });
     });
     $('#route-form').addEventListener('submit', (e) => { e.preventDefault(); planRoute(); });
+    setMode(routeMode);
+    $('#mode').addEventListener('click', (e) => {
+      const b = e.target.closest('button'); if (!b) return;
+      setMode(b.dataset.mode);
+      if (lastEvals) renderResult(); // ohne neue Abfrage umschalten
+    });
     $('#swap').addEventListener('click', () => {
       const f = $('#from'), t = $('#to');
       [f.value, t.value] = [t.value, f.value]; [f._picked, t._picked] = [t._picked, f._picked];
@@ -507,8 +518,15 @@
       const target = berlinToMs($('#arr-date').value, $('#arr-time').value);
       const conf = Number($('#conf').value), walk = Math.max(0, Number($('#walk').value) || 0);
       store.set('pk.lastRoute', { from, to, walk, conf: $('#conf').value });
-      const res = await searchJourneys(from, to, target, $('#only-local').checked, extraRef);
-      let journeys = res.journeys.filter((j) => j.legs?.length);
+      lastEvals = null;
+      const onlyRegional = routeMode === 'regional';
+      const [main, reg] = await Promise.allSettled([
+        searchJourneys(from, to, target, onlyRegional, extraRef),
+        onlyRegional || extraRef ? Promise.resolve({ journeys: [] }) : searchJourneys(from, to, target, true),
+      ]);
+      if (main.status === 'rejected') throw main.reason;
+      const res = main.value;
+      let journeys = res.journeys.concat(reg.status === 'fulfilled' ? reg.value.journeys : []).filter((j) => j.legs?.length);
       if (extraRef && lastQuery) journeys = journeys.concat(lastQuery.journeys);
       const seenJ = new Set();
       journeys = journeys.filter((j) => { const k = j.legs.map((l) => (l.plannedDeparture || l.departure) + (l.line?.name || 'walk')).join(); if (seenJ.has(k)) return false; seenJ.add(k); return true; });
@@ -582,14 +600,35 @@
       const startAt = legs.length ? legs[0].dep - 60e3 : now; // 1 Min. vor Abfahrt an der Haltestelle
       const sim = simulate(legs, target, startAt);
       const leave = Date.parse(j.legs[0].plannedDeparture || j.legs[0].departure) - walk * 60e3;
-      return { j, legs, info, sim, leave, transfers: info.filter((x) => !x.walk).length - 1 };
+      const long = info.some((x) => !x.walk && /^national/.test(x.line.product));
+      const arrive = Date.parse(j.legs.at(-1).plannedArrival || j.legs.at(-1).arrival);
+      return { j, legs, info, sim, leave, arrive, long, transfers: info.filter((x) => !x.walk).length - 1 };
     }).sort((a, b) => a.leave - b.leave);
     // Verbindungen, für die man schon zu spät losgehen müsste, ausblenden (falls es andere gibt)
     const future = evals.filter((e) => e.leave >= now - 60e3);
     if (future.length) evals.splice(0, evals.length, ...future);
 
-    const good = evals.filter((e) => e.sim.p >= conf);
-    const rec = good.length ? good[good.length - 1] : [...evals].sort((a, b) => b.sim.p - a.sim.p)[0];
+    lastEvals = { evals, target, conf, earlierRef };
+    renderResult();
+  }
+
+  // beste Verbindung einer Menge: die späteste, die die Sicherheit schafft, sonst die sicherste
+  function pick(set, conf) {
+    if (!set.length) return null;
+    const good = set.filter((e) => e.sim.p >= conf);
+    return good.length ? good[good.length - 1] : [...set].sort((a, b) => b.sim.p - a.sim.p)[0];
+  }
+  const dur = (e) => { const m = Math.round((e.arrive - e.leave) / 60e3); return m >= 60 ? `${Math.floor(m / 60)} Std. ${m % 60} Min.` : `${m} Min.`; };
+
+  function renderResult() {
+    const { evals: allEvals, target, conf, earlierRef } = lastEvals;
+    const now = Date.now();
+    const longs = allEvals.filter((e) => e.long), regs = allEvals.filter((e) => !e.long);
+    const bestLong = pick(longs, conf), bestReg = pick(regs, conf);
+    let evals = routeMode === 'fast' && longs.length ? longs : routeMode === 'regional' && regs.length ? regs : allEvals;
+    const modeNote = routeMode === 'fast' && !longs.length ? 'Keine Verbindung mit ICE/IC gefunden – hier alle Verbindungen.'
+      : routeMode === 'regional' && !regs.length ? 'Keine reine Regionalverbindung gefunden – hier alle Verbindungen.' : '';
+    const rec = pick(evals, conf);
     const recOK = rec.sim.p >= conf;
     const lv = level(rec.sim.p);
     const minsTo = Math.round((rec.leave - now) / 60e3);
@@ -609,13 +648,23 @@
       ${firstLeg && (firstLeg.cancelled || (firstLeg.live || 0) >= 180) ? `<div class="why"><b>Live:</b> ${firstLeg.cancelled ? 'Diese Fahrt fällt aus!' : `${firstLeg.line.label} hat gerade +${Math.round(firstLeg.live / 60)} Min.`}</div>` : ''}
       <div class="row center"><button id="save-route" class="chip">☆ Strecke merken</button></div>
     </div>`;
+    if (bestLong && bestReg) {
+      const opt = (e, m, title) => `<button class="${routeMode === m || (routeMode === 'all' && e === rec) ? 'on' : ''}" data-mode="${m}">
+        <div class="k">${title}</div><div class="t">${hm(e.leave)}</div>
+        <div class="k">an ${hm(e.arrive)} · ${dur(e)}</div>
+        <div class="k">${e.transfers <= 0 ? 'ohne Umstieg' : e.transfers + '× umsteigen'}</div>
+        <div style="margin-top:4px">${statusTag(e.sim.p, pct(e.sim.p) + ' pünktlich')}</div></button>`;
+      html = `<div class="card"><h3>ICE oder Regional?</h3><div class="compare" id="compare">${opt(bestLong, 'fast', 'Mit ICE/IC')}${opt(bestReg, 'regional', 'Nur Regional (D-Ticket)')}</div>
+        <p class="note">Antippen, um diese Variante zu wählen. Beide sind mit der Statistik der jeweiligen Verkehrsbetriebe berechnet.</p></div>` + html;
+    }
+    if (modeNote) html = `<div class="card small muted">${modeNote}</div>` + html;
     html += `<div class="card">${journeyHTML(rec, true, target).replace(/^<div class="card journey rec">/, '<div class="journey">')}</div>`;
     const others = evals.filter((e) => e !== rec);
     if (others.length) html += `<details class="card"><summary>Andere Verbindungen (${others.length})</summary>${others.map((e) => journeyHTML(e, false, target)).join('')}
       ${earlierRef ? `<button id="earlier" style="width:100%;margin-top:8px">Frühere Verbindungen laden</button>` : ''}</details>`;
     html += `<p class="note">Berechnet aus echten Live-Daten und der Verspätungsstatistik jeder Linie (3000 simulierte Fahrten). Ankommen bis ${hm(target)}.</p>`;
     routeOut.innerHTML = html;
-    $('.hero', routeOut).scrollIntoView({ behavior: 'smooth', block: 'start' });
+    (routeOut.firstElementChild || routeOut).scrollIntoView({ behavior: 'smooth', block: 'start' });
     const sv = $('#save-route');
     if (sv) {
       const key = (r) => (r.from.id || r.from.name) + '>' + (r.to.id || r.to.name);
@@ -629,6 +678,8 @@
       };
     }
     const btn = $('#earlier'); if (btn) btn.onclick = () => planRoute(earlierRef);
+    const cmp = $('#compare');
+    if (cmp) cmp.onclick = (e) => { const b = e.target.closest('[data-mode]'); if (b) { setMode(b.dataset.mode); renderResult(); } };
   }
 
   function journeyHTML(e, isRec, target) {
@@ -646,7 +697,7 @@
       return `<li><span class="badge">${esc(x.line.label)}</span><div style="flex:1">
         <div><b>${hm(x.dep)}</b> ${esc(x.l.origin?.name)} ${x.cancelled ? '<span class="cancel">fällt aus</span>' : ld}</div>
         <div class="muted small">→ ${esc(x.l.direction || x.l.destination?.name)} · an ${hm(x.arr)} ${esc(x.l.destination?.name)}${x.l.departurePlatform ? ' · Gl./Steig ' + esc(x.l.departurePlatform) : ''}</div>
-        <div class="muted small">Linie ${esc(x.line.label)}: ${pct(x.sum.punct)} pünktlich, ${pct(x.sum.cancel, 1)} Ausfall · Takt ~${Math.round(x.headway / 60e3)} Min. · Basis: ${esc(x.basis)} (${x.n} Fahrten)</div>
+        <div class="muted small">${esc(x.line.agency || 'Unbekannter Betrieb')} · ${esc(x.line.label)}: ${pct(x.sum.punct)} pünktlich, ${pct(x.sum.cancel, 1)} Ausfall · Takt ~${Math.round(x.headway / 60e3)} Min. · Basis: ${esc(x.basis)} (${x.n} Fahrten)</div>
       </div></li>`;
     }).join('');
     const arrPlanned = Date.parse(e.j.legs.at(-1).plannedArrival || e.j.legs.at(-1).arrival);
@@ -654,7 +705,7 @@
     const okW = sim.p * 100, cW = sim.rCancel * 100, mW = sim.rMiss * 100, dW = sim.rDelay * 100;
     return `<div class="card journey${isRec ? ' rec' : ''}">
       <div class="jhead"><div><div class="jtime">${hm(e.leave)} → ${hm(arrPlanned)}</div>
-        <div class="muted small">${e.transfers <= 0 ? 'ohne Umstieg' : e.transfers + ' Umstieg' + (e.transfers > 1 ? 'e' : '')} · ${buffer} Min. Puffer${isRec ? ' · <b>Empfehlung</b>' : ''}</div></div>
+        <div class="muted small">${e.transfers <= 0 ? 'ohne Umstieg' : e.transfers + ' Umstieg' + (e.transfers > 1 ? 'e' : '')}${e.long ? '<span class="tag">ICE/IC</span>' : '<span class="tag">Regional</span>'} · ${buffer} Min. Puffer${isRec ? ' · <b>Empfehlung</b>' : ''}</div></div>
         <div style="text-align:right"><div class="prob">${pct(sim.p)}</div>${statusTag(sim.p)}</div></div>
       <div class="meter" title="pünktlich / Ausfall / Umstieg verpasst / Verspätung">
         <i style="width:${okW}%;background:var(--good)"></i><i style="width:${cW}%;background:var(--critical)"></i><i style="width:${mW}%;background:var(--serious)"></i><i style="width:${dW}%;background:var(--warn)"></i>
@@ -732,43 +783,82 @@
   }
 
   // ---------- LINIEN ----------
-  let lineSrc = 'all', openKey = null;
+  let lineSrc = 'all', openKey = null, lineView = 'agencies', agencyFilter = null;
+  const agencyOf = (a) => a.agency || 'Unbekannter Betrieb';
+  const prodGroup = (p) => (p === 'regionalExpress' ? 'regional' : p === 'nationalExpress' ? 'national' : p);
   function initLines() {
     $('#line-q').addEventListener('input', () => { openKey = null; renderLines(); });
+    $('#line-sort').addEventListener('change', renderLines);
+    $('#line-prod').addEventListener('change', renderLines);
     $('#line-src').addEventListener('click', (e) => {
       const b = e.target.closest('button'); if (!b) return;
       lineSrc = b.dataset.src; $$('#line-src button').forEach((x) => x.classList.toggle('on', x === b)); renderLines();
     });
+    $('#line-view').addEventListener('click', (e) => {
+      const b = e.target.closest('button'); if (!b) return;
+      setView(b.dataset.view); renderLines();
+    });
+    $('#agency-filter').addEventListener('click', () => { agencyFilter = null; renderLines(); });
   }
-  function openLine(key) { openKey = key; $('#line-q').value = ''; renderLines(); scrollTo(0, 0); }
+  function setView(v) { lineView = v; openKey = null; $$('#line-view button').forEach((x) => x.classList.toggle('on', x.dataset.view === v)); }
+  function openLine(key) { openKey = key; renderLines(); scrollTo(0, 0); }
+  function sortRows(rows, how, nameOf) {
+    const by = {
+      tot: (x, y) => y.s.tot - x.s.tot,
+      worst: (x, y) => (x.s.punct ?? 1) - (y.s.punct ?? 1) || y.s.tot - x.s.tot,
+      best: (x, y) => (y.s.punct ?? 0) - (x.s.punct ?? 0) || y.s.tot - x.s.tot,
+      name: (x, y) => nameOf(x).localeCompare(nameOf(y), 'de', { numeric: true }),
+    }[how];
+    return rows.sort(by);
+  }
   function renderLines() {
-    const lines = allLines(lineSrc);
+    const all = allLines(lineSrc);
     const meta = [];
     meta.push(`Dieses Handy: ${Object.keys(local).length} Linien`);
-    meta.push(remote ? `Server-Statistik: ${Object.keys(remote.lines).length} Linien, Stand ${new Date(remote.generated).toLocaleString('de-DE')}` : cfg.remote ? 'Server-Statistik noch nicht erreichbar (Repository öffentlich?)' : 'Keine Server-Statistik eingerichtet (siehe „Mehr“)');
+    meta.push(remote ? `Server-Statistik: ${Object.keys(remote.lines).length} Linien, Stand ${new Date(remote.generated).toLocaleString('de-DE')}` : cfg.remote ? 'Server-Statistik noch nicht erreichbar' : 'Keine Server-Statistik eingerichtet (siehe „Mehr“)');
     $('#lines-meta').textContent = meta.join(' · ');
+    $('#agency-filter').innerHTML = agencyFilter ? `<button class="chip">Betrieb: ${esc(agencyFilter)} ✕</button>` : '';
     const out = $('#lines-out');
-    if (openKey && lines[openKey]) {
-      const a = lines[openKey];
-      out.innerHTML = `<button id="back" style="margin-bottom:12px">← Alle Linien</button>` +
-        lineProfileHTML(a, lineTitle(a), { sub: (a.agency ? a.agency + ' · ' : '') + (lineSrc === 'local' ? 'Nur auf diesem Handy beobachtete Fahrten' : lineSrc === 'remote' ? 'Server-Statistik' : 'Handy + Server-Statistik') });
+    if (openKey && all[openKey]) {
+      const a = all[openKey];
+      out.innerHTML = `<button id="back" style="margin-bottom:12px">← Zurück</button>` +
+        lineProfileHTML(a, lineTitle(a), { sub: agencyOf(a) + ' · ' + (lineSrc === 'local' ? 'Nur auf diesem Handy beobachtete Fahrten' : lineSrc === 'remote' ? 'Server-Statistik' : 'Handy + Server-Statistik') });
       $('#back').onclick = () => { openKey = null; renderLines(); };
       return;
     }
     const q = $('#line-q').value.trim().toLowerCase();
-    const rows = Object.values(lines).map((a) => ({ a, s: S.summary(a, cfg.thr) }))
-      .filter((r) => r.s.tot > 0 && (!q || r.a.name.toLowerCase() === q || r.a.name.toLowerCase().startsWith(q) || productName(r.a.product).toLowerCase().includes(q) || (q.length > 2 && (r.a.agency || '').toLowerCase().includes(q))))
-      .sort((x, y) => (x.a.product === y.a.product ? x.a.name.localeCompare(y.a.name, 'de', { numeric: true }) : order(x.a.product) - order(y.a.product)));
-    if (!rows.length) {
-      out.innerHTML = `<div class="card"><p>Noch keine Statistik${q ? ' für diese Linie' : ''}.</p><p class="muted small">Sie entsteht automatisch: Jede Haltestellen- oder Routenabfrage wertet die Fahrten der letzten 90 Minuten aus und speichert sie. Merke dir Haltestellen als Favorit, dann werden sie protokolliert, solange die App offen ist. Für eine durchgehende Statistik richte die Server-Statistik ein (README).</p></div>`;
+    const prod = $('#line-prod').value, how = $('#line-sort').value;
+    const lines = Object.values(all).filter((a) => (!prod || prodGroup(a.product) === prod) && (!agencyFilter || agencyOf(a) === agencyFilter));
+    const empty = `<div class="card"><p>Noch keine Statistik${q ? ' zu dieser Suche' : ''}.</p><p class="muted small">Sie wächst automatisch: Der Hintergrund-Sammler wertet alle 15 Minuten große Knoten in ganz Deutschland aus, und jede deiner Abfragen kommt dazu.</p></div>`;
+
+    if (lineView === 'agencies' && !agencyFilter) {
+      const groups = {};
+      for (const a of lines) {
+        const g = groups[agencyOf(a)] || (groups[agencyOf(a)] = { name: agencyOf(a), agg: null, n: 0, prods: new Set() });
+        g.agg = S.mergeAgg(g.agg, a); g.n++; g.prods.add(productName(prodGroup(a.product)));
+      }
+      let rows = Object.values(groups).map((g) => ({ g, s: S.summary(g.agg, cfg.thr) }))
+        .filter((r) => r.s.tot > 0 && (!q || r.g.name.toLowerCase().includes(q)));
+      if (!rows.length) { out.innerHTML = empty; return; }
+      rows = sortRows(rows, how, (r) => r.g.name);
+      const shown = rows.slice(0, 150);
+      out.innerHTML = `<div class="card"><table class="stats"><thead><tr><th>Verkehrsbetrieb</th><th>Pünktlich</th><th>Ausfall</th><th>Fahrten</th></tr></thead><tbody>
+        ${shown.map((r) => `<tr class="click" data-agency="${esc(r.g.name)}"><td><b>${esc(r.g.name)}</b><div class="muted small">${r.g.n} Linie${r.g.n > 1 ? 'n' : ''} · ${esc([...r.g.prods].join(', '))}</div></td>
+        <td><span class="status ${level(r.s.punct).cls}">${pct(r.s.punct)}</span></td><td>${pct(r.s.cancel, 1)}</td><td>${r.s.tot}</td></tr>`).join('')}
+        </tbody></table><p class="note">${rows.length > shown.length ? `${shown.length} von ${rows.length} Betrieben – oben suchen. ` : ''}Betrieb antippen, um seine Linien zu sehen.</p></div>`;
+      $$('tr.click', out).forEach((tr) => tr.onclick = () => { agencyFilter = tr.dataset.agency; setView('lines'); renderLines(); scrollTo(0, 0); });
       return;
     }
-    const shown = q ? rows.slice(0, 300) : [...rows].sort((x, y) => y.s.tot - x.s.tot).slice(0, 80)
-      .sort((x, y) => (x.a.product === y.a.product ? x.a.name.localeCompare(y.a.name, 'de', { numeric: true }) : order(x.a.product) - order(y.a.product)));
+
+    let rows = lines.map((a) => ({ a, s: S.summary(a, cfg.thr) }))
+      .filter((r) => r.s.tot > 0 && (!q || r.a.name.toLowerCase() === q || r.a.name.toLowerCase().startsWith(q) || (q.length > 2 && agencyOf(r.a).toLowerCase().includes(q))));
+    if (!rows.length) { out.innerHTML = empty; return; }
+    rows = sortRows(rows, how, (r) => r.a.name);
+    const shown = rows.slice(0, q || agencyFilter ? 300 : 100);
     out.innerHTML = `<div class="card"><table class="stats"><thead><tr><th>Linie</th><th>Pünktlich</th><th>Ausfall</th><th>Ø Min.</th><th>Fahrten</th></tr></thead><tbody>
-      ${shown.map((r) => `<tr class="click" data-key="${esc(r.a.key)}"><td><span class="badge">${esc(r.a.name)}</span> <span class="muted small">${productName(r.a.product)}</span>${r.a.agency ? `<div class="muted small">${esc(r.a.agency)}</div>` : ''}</td>
+      ${shown.map((r) => `<tr class="click" data-key="${esc(r.a.key)}"><td><span class="badge">${esc(r.a.name)}</span> <span class="muted small">${productName(r.a.product)}</span>${agencyFilter ? '' : `<div class="muted small">${esc(agencyOf(r.a))}</div>`}</td>
       <td><span class="status ${level(r.s.punct).cls}">${pct(r.s.punct)}</span></td><td>${pct(r.s.cancel, 1)}</td><td>${num(r.s.mean)}</td><td>${r.s.tot}</td></tr>`).join('')}
-      </tbody></table><p class="note">${rows.length > shown.length ? `Die ${shown.length} meistbeobachteten von ${rows.length} Linien. Suche oben nach Linie, Stadt oder Verkehrsbetrieb. ` : ''}Antippen für das Zuverlässigkeitsprofil.</p></div>`;
+      </tbody></table><p class="note">${rows.length > shown.length ? `${shown.length} von ${rows.length} Linien – oben suchen oder filtern. ` : ''}Antippen für das Zuverlässigkeitsprofil.</p></div>`;
     $$('tr.click', out).forEach((tr) => tr.onclick = () => openLine(tr.dataset.key));
   }
   const order = (p) => ['tram', 'subway', 'bus', 'suburban', 'regional', 'regionalExpress'].indexOf(p) + 1 || 9;
