@@ -49,6 +49,8 @@
     return { key: `${product}|${name}|${agency}`, name, product, agency, label: name };
   }
   const productName = (p) => PRODUCT[p] || p;
+  // "Bahn 18", aber "RE8", "S11", "ICE" ohne doppelte Gattung
+  const lineTitle = (l) => (/^(S|U|RE|RB|ICE|ICD|IC|EC|ECE|NJ|RJX?|FLX|FlixBus)/i.test(l.label || l.name) ? (l.label || l.name) : `${productName(l.product)} ${l.label || l.name}`);
 
   // ---------- API ----------
   const cache = new Map();
@@ -429,9 +431,9 @@
     const near = ts.filter((t) => Math.abs(t - around) < 90 * 60e3);
     const gaps = [];
     for (let i = 1; i < near.length; i++) if (near[i] - near[i - 1] > 60e3) gaps.push(near[i] - near[i - 1]);
-    if (!gaps.length) return line.product === 'bus' ? 20 * 60e3 : 10 * 60e3;
+    if (!gaps.length) return ({ bus: 20, tram: 10, subway: 10, suburban: 20, regional: 60, regionalExpress: 60, national: 120, nationalExpress: 60 }[line.product] || 20) * 60e3;
     gaps.sort((a, b) => a - b);
-    return Math.min(60 * 60e3, gaps[Math.floor(gaps.length / 2)]);
+    return Math.min(120 * 60e3, gaps[Math.floor(gaps.length / 2)]);
   }
 
   // ---------- ROUTE ----------
@@ -593,7 +595,7 @@
     const minsTo = Math.round((rec.leave - now) / 60e3);
     const recLegs = rec.info.filter((x) => !x.walk);
     const firstLeg = recLegs[0];
-    const how = recLegs.map((x) => `${productName(x.line.product)} ${x.line.label}`).join(' → ');
+    const how = recLegs.map((x) => lineTitle(x.line)).join(' → ');
     const verdict = !recOK ? 'Riskant – keine Verbindung ist sicher genug. Lieber früher los!'
       : rec.sim.p >= 0.95 ? 'Sehr sicher 👍' : rec.sim.p >= 0.9 ? 'Sicher' : 'Etwas Puffer einplanen';
     const biggest = [['Ausfall', rec.sim.rCancel], ['verpasster Umstieg', rec.sim.rMiss], ['Verspätung', rec.sim.rDelay]].sort((x, y) => y[1] - x[1])[0];
@@ -749,7 +751,7 @@
     if (openKey && lines[openKey]) {
       const a = lines[openKey];
       out.innerHTML = `<button id="back" style="margin-bottom:12px">← Alle Linien</button>` +
-        lineProfileHTML(a, `${productName(a.product)} ${a.name}`, { sub: (a.agency ? a.agency + ' · ' : '') + (lineSrc === 'local' ? 'Nur auf diesem Handy beobachtete Fahrten' : lineSrc === 'remote' ? 'Server-Statistik' : 'Handy + Server-Statistik') });
+        lineProfileHTML(a, lineTitle(a), { sub: (a.agency ? a.agency + ' · ' : '') + (lineSrc === 'local' ? 'Nur auf diesem Handy beobachtete Fahrten' : lineSrc === 'remote' ? 'Server-Statistik' : 'Handy + Server-Statistik') });
       $('#back').onclick = () => { openKey = null; renderLines(); };
       return;
     }
