@@ -57,8 +57,14 @@
           <label class="field"><span>Fußweg bis zur Haltestelle (Minuten)</span>
             <input id="walk" type="number" min="0" max="60" value="0" inputmode="numeric">
           </label>
-          <label class="check"><input type="checkbox" id="only-local"> Nur Nahverkehr (ohne ICE/IC)</label>
         </details>
+        <div class="field"><span class="lbl">Womit fahren?</span>
+          <div class="seg" id="mode" role="tablist">
+            <button type="button" data-mode="all" class="on">Vergleichen</button>
+            <button type="button" data-mode="fast">Mit ICE/IC</button>
+            <button type="button" data-mode="regional">Nur Regional</button>
+          </div>
+        </div>
         <button class="primary" type="submit">Wann muss ich los?</button>
       </form>
       <div id="route-out"></div>
@@ -80,9 +86,35 @@
     <!-- LINES -->
     <section id="tab-lines" class="tab" aria-label="Linien">
       <div class="card">
-        <label class="field"><span>Linie suchen</span>
-          <input id="line-q" type="search" placeholder="Linie oder Verkehrsbetrieb, z. B. 7, S1, KVB, Hamburg" inputmode="search">
+        <div class="seg" role="tablist" id="line-view" style="margin-bottom:10px">
+          <button data-view="agencies" class="on">Verkehrsbetriebe</button>
+          <button data-view="lines">Linien</button>
+        </div>
+        <label class="field"><span>Suchen</span>
+          <input id="line-q" type="search" placeholder="Betrieb, Stadt oder Linie, z. B. KVB, Hamburg, S1, 7" inputmode="search">
         </label>
+        <div class="chips" id="agency-filter"></div>
+        <div class="grid2">
+          <label class="field"><span>Sortieren nach</span>
+            <select id="line-sort">
+              <option value="tot">Meiste Fahrten</option>
+              <option value="worst">Unpünktlichste zuerst</option>
+              <option value="best">Pünktlichste zuerst</option>
+              <option value="name">Name</option>
+            </select>
+          </label>
+          <label class="field"><span>Verkehrsmittel</span>
+            <select id="line-prod">
+              <option value="">Alle</option>
+              <option value="tram">Straßenbahn / Stadtbahn</option>
+              <option value="subway">U-Bahn</option>
+              <option value="bus">Bus</option>
+              <option value="suburban">S-Bahn</option>
+              <option value="regional">Regionalverkehr (RB/RE)</option>
+              <option value="national">Fernverkehr (ICE/IC)</option>
+            </select>
+          </label>
+        </div>
         <div class="seg" role="tablist" id="line-src">
           <button data-src="all" class="on">Alle Daten</button>
           <button data-src="local">Nur dieses Handy</button>

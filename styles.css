@@ -189,6 +189,13 @@ details summary { cursor: pointer; color: var(--accent); font-size: 14px; margin
 @media (max-width: 380px) { .hero .big { font-size: 38px; } .kpi b { font-size: 17px; } }
 
 /* vereinfachte Bedienung */
+.field > .lbl { display: block; font-size: 13px; color: var(--ink-2); margin-bottom: 4px; }
+.compare { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.compare button { text-align: left; display: block; padding: 10px; border-radius: 10px; min-height: 0; background: var(--surface); }
+.compare button.on { border: 2px solid var(--accent); }
+.compare .t { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.compare .k { font-size: 12px; color: var(--ink-2); }
+.tag { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 6px; border: 1px solid var(--axis); color: var(--ink-2); margin-left: 4px; }
 .chips.big { margin-bottom: 12px; }
 .chips.big .chip { min-height: 48px; font-size: 16px; font-weight: 600; padding: 6px 16px; border-radius: 24px; background: var(--card); }
 .chips.big .chip small { display: block; font-weight: 400; font-size: 12px; color: var(--ink-2); }
@@ -198,3 +205,5 @@ details.opts > summary { color: var(--ink-2); }
 .verdict { font-size: 17px; font-weight: 600; margin-top: 10px; }
 .hero .why { font-size: 13px; color: var(--ink-2); margin-top: 6px; }
 .row.center { justify-content: center; margin-top: 12px; }
+
+.card { scroll-margin-top: 64px; }
