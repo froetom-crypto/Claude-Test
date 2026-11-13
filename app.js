@@ -13,8 +13,9 @@
     del(k) { try { localStorage.removeItem(k); } catch { /* egal */ } },
   };
 
-  const DEFAULTS = { thr: 3, api: 'https://v6.db.transport.rest', remote: 'https://raw.githubusercontent.com/froetom-crypto/Claude-Test/stats-data/stats.json', collect: true };
+  const DEFAULTS = { thr: 3, api: 'https://api.transitous.org', remote: 'https://raw.githubusercontent.com/froetom-crypto/Claude-Test/stats-data/stats.json', collect: true };
   let cfg = { ...DEFAULTS, ...store.get('pk.cfg', {}) };
+  if (/transport\.rest/.test(cfg.api)) cfg.api = DEFAULTS.api; // alte, abgeschaltete Schnittstelle
   if (!cfg.remote) cfg.remote = DEFAULTS.remote;
   let favs = store.get('pk.favs', []);            // [{id,name}]
   let local = store.get('pk.lines', {});          // key -> Aggregat
@@ -87,37 +88,83 @@
   }
   addEventListener('online', setNet); addEventListener('offline', setNet);
 
+  // ---------- Adapter für Transitous (MOTIS-API, freie Fahrplan- und Echtzeitdaten) ----------
+  const MODE = {
+    TRAM: 'tram', SUBWAY: 'subway', METRO: 'subway', BUS: 'bus', COACH: 'bus', SUBURBAN: 'suburban',
+    REGIONAL_RAIL: 'regional', RAIL: 'regional', REGIONAL_FAST_RAIL: 'regionalExpress',
+    HIGHSPEED_RAIL: 'nationalExpress', LONG_DISTANCE: 'national', NIGHT_RAIL: 'national', FERRY: 'ferry', ODM: 'taxi',
+  };
+  const TRANSIT = (m) => !!MODE[m] || (m && !['WALK', 'BIKE', 'CAR', 'RENTAL', 'FLEX', 'CAR_PARKING', 'CAR_DROPOFF'].includes(m));
+  const KOELN = [50.9375, 6.9603];
+  const distKm = (lat, lon) => Math.hypot((lat - KOELN[0]) * 111, (lon - KOELN[1]) * 70);
+  const stationOf = (id) => String(id || '').replace(/:\d+:\d+$/, '');
+
   async function searchLocations(q) {
-    const res = await api('/locations', { query: q, results: 8, stops: 'true', addresses: 'true', poi: 'true', linesOfStops: 'false' }, 300e3);
-    // Ergebnisse in/um Köln nach vorn
-    return (Array.isArray(res) ? res : []).filter((x) => x && (x.id || x.latitude || x.location)).sort((a, b) => {
-      const k = (x) => (/köln|koeln|cologne/i.test(x.name || x.address || '') ? 0 : 1);
-      return k(a) - k(b);
-    });
+    const res = await api('/api/v1/geocode', { text: q, language: 'de' }, 300e3);
+    return (Array.isArray(res) ? res : []).filter((x) => x && Number.isFinite(x.lat)).map((x) => {
+      const city = (x.areas || []).find((a) => a.default)?.name || '';
+      const isStop = x.type === 'STOP';
+      const name = x.type === 'ADDRESS' ? [x.street || x.name, x.houseNumber].filter(Boolean).join(' ') + (city ? ', ' + city : '') : x.name;
+      return { type: isStop ? 'stop' : 'location', poi: x.type === 'PLACE', id: x.id, name, address: name, latitude: x.lat, longitude: x.lon, city, d: distKm(x.lat, x.lon) };
+    }).filter((x, _, all) => x.d < 60 || !all.some((y) => y.d < 60)); // nur Köln & Umgebung, falls vorhanden
   }
 
-  function normDep(d) {
-    const line = normLine(d.line);
-    const planned = Date.parse(d.plannedWhen || d.when);
-    const when = d.when ? Date.parse(d.when) : null;
-    let delayMin = null;
-    if (typeof d.delay === 'number') delayMin = d.delay / 60;
-    else if (when && d.plannedWhen && d.when && d.delay !== null && d.delay !== undefined) delayMin = (when - planned) / 60e3;
+  function normDep(s) {
+    const pl = s.place || {};
+    const line = normLine({ name: s.routeShortName || s.displayName || s.tripShortName, product: MODE[s.mode] || 'unknown' });
+    const planned = Date.parse(pl.scheduledDeparture || pl.departure);
+    const when = pl.departure ? Date.parse(pl.departure) : null;
+    const cancelled = !!(s.cancelled || s.tripCancelled || pl.cancelled);
     return {
-      id: `${d.tripId || line?.key + '@' + planned}|${d.stop?.id || ''}`,
-      tripId: d.tripId, line, direction: d.direction || '', planned, when,
-      delayMin, cancelled: !!d.cancelled, platform: d.platform || d.plannedPlatform || '',
-      stopId: d.stop?.id, stopName: d.stop?.name,
+      id: `${s.tripId || line.key + '@' + planned}|${stationOf(pl.stopId)}`,
+      tripId: s.tripId, line, direction: s.headsign || s.tripTo?.name || '', planned, when: cancelled ? null : when,
+      delayMin: s.realTime && when ? (when - planned) / 60e3 : null, cancelled,
+      platform: pl.track || pl.scheduledTrack || '', stopId: pl.stopId, stopName: pl.name,
+      ends: !!(s.tripTo && s.tripTo.stopId === pl.stopId),
     };
   }
 
   async function departures(stopId, from, durationMin, ttl = 60e3) {
-    const res = await api(`/stops/${encodeURIComponent(stopId)}/departures`, {
-      when: new Date(from).toISOString(), duration: durationMin, results: 400,
-      remarks: 'false', linesOfStops: 'false',
+    const res = await api('/api/v1/stoptimes', {
+      stopId, time: new Date(from).toISOString(), n: Math.min(300, Math.max(40, Math.round(durationMin * 1.6))),
     }, ttl);
-    const list = Array.isArray(res) ? res : (res.departures || []);
-    return list.map(normDep).filter((d) => d.line && Number.isFinite(d.planned));
+    const end = from + durationMin * 60e3;
+    return (res.stopTimes || []).map(normDep)
+      .filter((d) => d.line && !d.ends && Number.isFinite(d.planned) && d.planned >= from && d.planned < end);
+  }
+
+  function normItinerary(it) {
+    return {
+      legs: (it.legs || []).map((l) => {
+        const pDep = l.from?.scheduledDeparture || l.scheduledStartTime || l.startTime;
+        const dep = l.from?.departure || l.startTime;
+        const pArr = l.to?.scheduledArrival || l.scheduledEndTime || l.endTime;
+        const arr = l.to?.arrival || l.endTime;
+        const base = {
+          origin: { id: l.from?.stopId, name: l.from?.name === 'START' ? 'Start' : l.from?.name },
+          destination: { id: l.to?.stopId, name: l.to?.name === 'END' ? 'Ziel' : l.to?.name },
+          plannedDeparture: pDep, departure: dep, plannedArrival: pArr, arrival: arr,
+        };
+        if (!TRANSIT(l.mode)) return { ...base, walking: true };
+        return {
+          ...base,
+          departureDelay: l.realTime ? (Date.parse(dep) - Date.parse(pDep)) / 1000 : null,
+          line: { name: l.routeShortName || l.displayName || l.tripShortName || '?', product: MODE[l.mode] || 'unknown' },
+          direction: l.headsign || '', cancelled: !!(l.cancelled || l.tripCancelled),
+          departurePlatform: l.from?.track || l.from?.scheduledTrack || '',
+        };
+      }),
+    };
+  }
+
+  async function searchJourneys(from, to, target, onlyLocal, cursor) {
+    const params = { fromPlace: placeParam(from), toPlace: placeParam(to), numItineraries: 6 };
+    if (cursor) params.pageCursor = cursor; else { params.time = new Date(target).toISOString(); params.arriveBy = 'true'; }
+    if (onlyLocal) params.transitModes = 'TRAM,SUBWAY,BUS,SUBURBAN,REGIONAL_RAIL,REGIONAL_FAST_RAIL,FERRY';
+    let res;
+    try { res = await api('/api/v1/plan', params, 30e3); }
+    catch (e) { if (!onlyLocal) throw e; delete params.transitModes; res = await api('/api/v1/plan', params, 30e3); }
+    return { journeys: (res.itineraries || []).map(normItinerary), earlierRef: res.previousPageCursor };
   }
 
   // Vergangene Abfahrten haben endgültige Verspätungen → in die Statistik
@@ -277,9 +324,9 @@
         const my = ++seq;
         try {
           let res = await searchLocations(q);
-          if (opts.stopsOnly) res = res.filter((x) => x.type === 'stop' || x.type === 'station');
+          if (opts.stopsOnly) res = res.filter((x) => x.type === 'stop');
           if (my !== seq) return;
-          list.innerHTML = res.map((x, i) => `<li role="option" data-i="${i}">${esc(x.name || x.address)}<small>${x.type === 'stop' || x.type === 'station' ? 'Haltestelle' : x.poi ? 'Ort' : 'Adresse'}</small></li>`).join('');
+          list.innerHTML = res.map((x, i) => `<li role="option" data-i="${i}">${esc(x.name || x.address)}<small>${x.type === 'stop' ? 'Haltestelle' : x.poi ? 'Ort' : 'Adresse'}${x.city && !String(x.name).includes(x.city) ? ' · ' + esc(x.city) : ''}</small></li>`).join('');
           list._res = res;
         } catch (e) { list.innerHTML = `<li>${esc(e.message)}</li>`; }
       }, 250);
@@ -302,13 +349,9 @@
     input._picked = res[0]; input.value = res[0].name || res[0].address;
     return res[0];
   }
-  function placeParams(prefix, x) {
-    if (x.type === 'stop' || x.type === 'station') return { [prefix]: x.id };
-    const lat = x.latitude ?? x.location?.latitude, lon = x.longitude ?? x.location?.longitude;
-    const p = { [`${prefix}.latitude`]: lat, [`${prefix}.longitude`]: lon };
-    if (x.poi && x.id) { p[`${prefix}.id`] = x.id; p[`${prefix}.name`] = x.name; }
-    else p[`${prefix}.address`] = x.address || x.name || 'Standort';
-    return p;
+  function placeParam(x) {
+    if (x.type === 'stop' && x.id) return x.id;
+    return `${x.latitude},${x.longitude}`;
   }
 
   // ---------- Simulation einer Verbindung ----------
@@ -353,7 +396,7 @@
           if (k === 0 && L.cancelled) { cancelHit = true; continue; }
           if (!known && rnd() < L.dist.pc) { if (planned + 60e3 >= ready) cancelHit = true; continue; }
           let d;
-          if (known) d = Math.max(-60, L.liveDelay + (sampleDelaySec(L.dist, rnd) - (L.dist.median + 0.5) * 60) * 0.5);
+          if (known) d = Math.max(Math.min(0, L.liveDelay), L.liveDelay + (sampleDelaySec(L.dist, rnd) - (L.dist.median + 0.5) * 60) * 0.5);
           else d = sampleDelaySec(L.dist, rnd);
           actDep = planned + d * 1000;
           if (actDep >= ready) break;
@@ -430,14 +473,8 @@
       const target = berlinToMs($('#arr-date').value, $('#arr-time').value);
       const conf = Number($('#conf').value), walk = Math.max(0, Number($('#walk').value) || 0);
       store.set('pk.lastRoute', { from, to, walk, conf: $('#conf').value });
-      const params = {
-        ...placeParams('from', from), ...placeParams('to', to),
-        results: 6, stopovers: 'false', remarks: 'true', tickets: 'false', polylines: 'false',
-      };
-      if (extraRef) params.earlierThan = extraRef; else params.arrival = new Date(target).toISOString();
-      if ($('#only-local').checked) Object.assign(params, { nationalExpress: 'false', national: 'false', regionalExpress: 'true' });
-      const res = await api('/journeys', params, 30e3);
-      let journeys = (res.journeys || []).filter((j) => j.legs?.length);
+      const res = await searchJourneys(from, to, target, $('#only-local').checked, extraRef);
+      let journeys = res.journeys.filter((j) => j.legs?.length);
       if (extraRef && lastQuery) journeys = journeys.concat(lastQuery.journeys);
       const seenJ = new Set();
       journeys = journeys.filter((j) => { const k = j.legs.map((l) => (l.plannedDeparture || l.departure) + (l.line?.name || 'walk')).join(); if (seenJ.has(k)) return false; seenJ.add(k); return true; });
@@ -446,7 +483,7 @@
       routeOut.innerHTML = `<div class="loading">Werte Verspätungen der ${journeys.length} Verbindungen aus …</div>`;
       await evaluateJourneys(journeys, target, conf, walk, res.earlierRef);
     } catch (e) {
-      routeOut.innerHTML = `<div class="card err"><b>Fehler:</b> ${esc(e.message)}<p class="note">Die Echtzeit-Auskunft (transport.rest) ist manchmal überlastet. Einfach nochmal versuchen.</p></div>`;
+      routeOut.innerHTML = `<div class="card err"><b>Fehler:</b> ${esc(e.message)}<p class="note">Die Echtzeit-Auskunft (Transitous) ist manchmal kurz überlastet. Einfach nochmal versuchen.</p></div>`;
     }
   }
 
@@ -508,7 +545,7 @@
         });
         info.push({ l, line, dep, arr, live, cancelled: !!l.cancelled, n, basis, sum: S.summary(agg, cfg.thr), headway: legs[legs.length - 1].headway });
       }
-      const startAt = legs.length ? legs[0].dep : now;
+      const startAt = legs.length ? legs[0].dep - 60e3 : now; // 1 Min. vor Abfahrt an der Haltestelle
       const sim = simulate(legs, target, startAt);
       const leave = Date.parse(j.legs[0].plannedDeparture || j.legs[0].departure) - walk * 60e3;
       return { j, legs, info, sim, leave, transfers: info.filter((x) => !x.walk).length - 1 };
@@ -650,7 +687,7 @@
     const lines = allLines(lineSrc);
     const meta = [];
     meta.push(`Dieses Handy: ${Object.keys(local).length} Linien`);
-    meta.push(remote ? `Server-Statistik: ${Object.keys(remote.lines).length} Linien, Stand ${new Date(remote.generated).toLocaleString('de-DE')}` : 'Keine Server-Statistik eingerichtet (siehe „Mehr“)');
+    meta.push(remote ? `Server-Statistik: ${Object.keys(remote.lines).length} Linien, Stand ${new Date(remote.generated).toLocaleString('de-DE')}` : cfg.remote ? 'Server-Statistik noch nicht erreichbar (Repository öffentlich?)' : 'Keine Server-Statistik eingerichtet (siehe „Mehr“)');
     $('#lines-meta').textContent = meta.join(' · ');
     const out = $('#lines-out');
     if (openKey && lines[openKey]) {

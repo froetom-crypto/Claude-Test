@@ -1,0 +1,26 @@
+name: Live-Test (echter Browser, echte Daten)
+on:
+  workflow_dispatch:
+  push:
+    branches: [ccr-a176c7b3-u1epln]
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Sammler gegen Live-API (Probelauf, nichts wird gespeichert)
+        run: node collector/collect.mjs /tmp/stats.json && node -e "const s=require('/tmp/stats.json');const S=require('./stats.js');for(const a of Object.values(s.lines).sort((x,y)=>S.summary(y).tot-S.summary(x).tot).slice(0,15)){const m=S.summary(a);console.log(a.product,a.name,'n='+m.tot,'puenktlich='+(m.punct*100).toFixed(0)+'%','ausfall='+(m.cancel*100).toFixed(1)+'%')}"
+      - name: App im echten Browser mit Live-Daten
+        run: |
+          npm i --no-save --silent playwright-core@1.48.2
+          python3 -m http.server 8080 >/dev/null 2>&1 &
+          sleep 1
+          node .github/e2e/e2e.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshots
+          path: '*.png'

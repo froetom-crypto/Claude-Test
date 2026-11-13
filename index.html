@@ -94,8 +94,8 @@
         <label class="field"><span>Pünktlich heißt: weniger als … Minuten Verspätung</span>
           <input id="set-thr" type="number" min="1" max="10" value="3" inputmode="numeric">
         </label>
-        <label class="field"><span>Echtzeit-API (transport.rest-kompatibel)</span>
-          <input id="set-api" type="url" value="https://v6.db.transport.rest">
+        <label class="field"><span>Echtzeit-API (MOTIS / Transitous)</span>
+          <input id="set-api" type="url" value="https://api.transitous.org">
         </label>
         <label class="field"><span>Server-Statistik (stats.json, optional)</span>
           <input id="set-remote" type="url" placeholder="https://raw.githubusercontent.com/…/stats.json">
@@ -113,10 +113,10 @@
       </div>
       <div class="card small muted">
         <h2>So wird gerechnet</h2>
-        <p><b>Live:</b> Abfahrten, Verspätungen und Ausfälle kommen aus der DB-Echtzeitauskunft (deckt KVB-Stadtbahn und Busse ab) über transport.rest.</p>
+        <p><b>Live:</b> Abfahrten, Verspätungen und Ausfälle kommen von Transitous (freie Auskunft auf Basis der deutschlandweiten DELFI-Fahrplan- und Echtzeitdaten, inkl. KVB-Stadtbahn und Busse).</p>
         <p><b>Statistik:</b> (1) Die letzten 90 Minuten jeder abgefragten Haltestelle (tatsächliche Verspätungen). (2) Alles, was dieses Handy je beobachtet hat. (3) Optional eine Server-Statistik, die ein GitHub-Workflow alle 15 Minuten sammelt.</p>
         <p><b>Wahrscheinlichkeit:</b> 3000 simulierte Fahrten pro Verbindung. Je Fahrt werden Verspätungen aus der echten Verteilung der jeweiligen Linie gezogen; Ausfälle und verpasste Umstiege kosten einen Takt Wartezeit. Gibt es schon eine Live-Verspätung, wird sie eingerechnet.</p>
-        <p>Inoffiziell, keine Gewähr. Daten: Deutsche Bahn / VRS über transport.rest.</p>
+        <p>Inoffiziell, keine Gewähr. Daten: Transitous / DELFI.</p>
       </div>
     </section>
   </main>
