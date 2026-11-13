@@ -21,9 +21,10 @@
   <main>
     <!-- ROUTE -->
     <section id="tab-route" class="tab active" aria-label="Route planen">
+      <div class="chips big" id="route-favs"></div>
       <form id="route-form" class="card" autocomplete="off">
         <label class="field">
-          <span>Start</span>
+          <span>Von</span>
           <div class="row">
             <input id="from" type="text" placeholder="Haltestelle oder Adresse" required>
             <button type="button" id="geo" class="icon-btn" title="Mein Standort" aria-label="Mein Standort">◎</button>
@@ -31,28 +32,33 @@
           <ul class="suggest" id="from-suggest" role="listbox"></ul>
         </label>
         <label class="field">
-          <span>Ziel</span>
-          <input id="to" type="text" placeholder="Haltestelle oder Adresse" required>
+          <span>Nach</span>
+          <div class="row">
+            <input id="to" type="text" placeholder="Haltestelle oder Adresse" required>
+            <button type="button" id="swap" class="icon-btn" title="Tauschen" aria-label="Start und Ziel tauschen">⇅</button>
+          </div>
           <ul class="suggest" id="to-suggest" role="listbox"></ul>
         </label>
-        <div class="grid2">
-          <label class="field"><span>Ankommen bis</span><input id="arr-date" type="date" required></label>
-          <label class="field"><span>Uhrzeit</span><input id="arr-time" type="time" required></label>
-        </div>
-        <div class="grid2">
-          <label class="field"><span>Gewünschte Sicherheit</span>
+        <label class="field"><span>Ich muss da sein um</span>
+          <div class="row">
+            <input id="arr-time" type="time" required>
+            <input id="arr-date" type="date" required class="date">
+          </div>
+        </label>
+        <details class="opts"><summary>Optionen</summary>
+          <label class="field"><span>Wie sicher willst du sein?</span>
             <select id="conf">
-              <option value="0.8">80 %</option>
-              <option value="0.9" selected>90 %</option>
-              <option value="0.95">95 %</option>
-              <option value="0.98">98 %</option>
+              <option value="0.8">Normal (80 %)</option>
+              <option value="0.9" selected>Sicher (90 %)</option>
+              <option value="0.95">Sehr sicher (95 %)</option>
+              <option value="0.98">Auf keinen Fall zu spät (98 %)</option>
             </select>
           </label>
-          <label class="field"><span>Fußweg zur 1. Haltestelle (min)</span>
+          <label class="field"><span>Fußweg bis zur Haltestelle (Minuten)</span>
             <input id="walk" type="number" min="0" max="60" value="0" inputmode="numeric">
           </label>
-        </div>
-        <label class="check"><input type="checkbox" id="only-local" checked> Nur Nahverkehr (Stadtbahn, Bus, S-Bahn, RB)</label>
+          <label class="check"><input type="checkbox" id="only-local" checked> Nur Bahn, Bus und S-Bahn (kein Fernverkehr)</label>
+        </details>
         <button class="primary" type="submit">Wann muss ich los?</button>
       </form>
       <div id="route-out"></div>
@@ -122,9 +128,9 @@
   </main>
 
   <nav class="tabs" role="tablist">
-    <button data-tab="route" class="on" role="tab"><span aria-hidden="true">⇢</span>Route</button>
-    <button data-tab="stop" role="tab"><span aria-hidden="true">◉</span>Haltestelle</button>
-    <button data-tab="lines" role="tab"><span aria-hidden="true">≡</span>Linien</button>
+    <button data-tab="route" class="on" role="tab"><span aria-hidden="true">⏰</span>Wann los?</button>
+    <button data-tab="stop" role="tab"><span aria-hidden="true">🚋</span>Abfahrten</button>
+    <button data-tab="lines" role="tab"><span aria-hidden="true">📊</span>Statistik</button>
     <button data-tab="settings" role="tab"><span aria-hidden="true">⚙</span>Mehr</button>
   </nav>
 
