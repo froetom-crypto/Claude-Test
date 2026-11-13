@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1a1a19">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Pünktlich">
+  <title>Pünktlich Deutschland</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="top">
+    <h1>Pünktlich</h1>
+    <span id="net" class="net" aria-live="polite"></span>
+  </header>
+
+  <main>
+    <!-- ROUTE -->
+    <section id="tab-route" class="tab active" aria-label="Route planen">
+      <div class="chips big" id="route-favs"></div>
+      <form id="route-form" class="card" autocomplete="off">
+        <label class="field">
+          <span>Von</span>
+          <div class="row">
+            <input id="from" type="text" placeholder="Haltestelle oder Adresse" required>
+            <button type="button" id="geo" class="icon-btn" title="Mein Standort" aria-label="Mein Standort">◎</button>
+          </div>
+          <ul class="suggest" id="from-suggest" role="listbox"></ul>
+        </label>
+        <label class="field">
+          <span>Nach</span>
+          <div class="row">
+            <input id="to" type="text" placeholder="Haltestelle oder Adresse" required>
+            <button type="button" id="swap" class="icon-btn" title="Tauschen" aria-label="Start und Ziel tauschen">⇅</button>
+          </div>
+          <ul class="suggest" id="to-suggest" role="listbox"></ul>
+        </label>
+        <label class="field"><span>Ich muss da sein um</span>
+          <div class="row">
+            <input id="arr-time" type="time" required>
+            <input id="arr-date" type="date" required class="date">
+          </div>
+        </label>
+        <details class="opts"><summary>Optionen</summary>
+          <label class="field"><span>Wie sicher willst du sein?</span>
+            <select id="conf">
+              <option value="0.8">Normal (80 %)</option>
+              <option value="0.9" selected>Sicher (90 %)</option>
+              <option value="0.95">Sehr sicher (95 %)</option>
+              <option value="0.98">Auf keinen Fall zu spät (98 %)</option>
+            </select>
+          </label>
+          <label class="field"><span>Fußweg bis zur Haltestelle (Minuten)</span>
+            <input id="walk" type="number" min="0" max="60" value="0" inputmode="numeric">
+          </label>
+        </details>
+        <div class="field"><span class="lbl">Womit fahren?</span>
+          <div class="seg" id="mode" role="tablist">
+            <button type="button" data-mode="all" class="on">Vergleichen</button>
+            <button type="button" data-mode="fast">Mit ICE/IC</button>
+            <button type="button" data-mode="regional">Nur Regional</button>
+          </div>
+        </div>
+        <button class="primary" type="submit">Wann muss ich los?</button>
+      </form>
+      <div id="route-out"></div>
+    </section>
+
+    <!-- STOP -->
+    <section id="tab-stop" class="tab" aria-label="Haltestelle">
+      <div class="card">
+        <label class="field">
+          <span>Haltestelle</span>
+          <input id="stop-q" type="text" placeholder="z. B. Köln Neumarkt, Hamburg Hbf" autocomplete="off">
+          <ul class="suggest" id="stop-suggest" role="listbox"></ul>
+        </label>
+        <div class="chips" id="fav-chips"></div>
+      </div>
+      <div id="stop-out"></div>
+    </section>
+
+    <!-- LINES -->
+    <section id="tab-lines" class="tab" aria-label="Statistik">
+      <div class="card">
+        <div class="seg" role="tablist" id="line-view" style="margin-bottom:10px">
+          <button data-view="agencies" class="on">Verkehrsbetriebe</button>
+          <button data-view="lines">Linien</button>
+          <button data-view="cities">Städte</button>
+        </div>
+        <label class="field"><span>Suche</span>
+          <input id="line-q" type="search" placeholder="Stadt, Betrieb oder Linie – z. B. Köln, KVB, S1, 7" inputmode="search" autocomplete="off">
+        </label>
+        <div class="chips" id="active-filters"></div>
+        <details class="opts" id="filter-box" open><summary>Filter &amp; Sortierung</summary>
+          <div class="grid2">
+            <label class="field"><span>Sortieren nach</span>
+              <select id="line-sort">
+                <option value="tot_desc">Fahrten – meiste zuerst</option>
+                <option value="tot_asc">Fahrten – wenigste zuerst</option>
+                <option value="punct_desc">Pünktlichkeit – beste zuerst</option>
+                <option value="punct_asc">Pünktlichkeit – schlechteste zuerst</option>
+                <option value="cancel_desc">Ausfälle – meiste zuerst</option>
+                <option value="cancel_asc">Ausfälle – wenigste zuerst</option>
+                <option value="mean_desc">Ø Verspätung – größte zuerst</option>
+                <option value="mean_asc">Ø Verspätung – kleinste zuerst</option>
+                <option value="late5_desc">≥ 5 Min. zu spät – meiste zuerst</option>
+                <option value="late5_asc">≥ 5 Min. zu spät – wenigste zuerst</option>
+                <option value="name_asc">Name A–Z</option>
+                <option value="name_desc">Name Z–A</option>
+                <option value="city_asc">Stadt A–Z</option>
+              </select>
+            </label>
+            <label class="field"><span>Stadt</span>
+              <select id="f-city"><option value="">Alle Städte</option></select>
+            </label>
+            <label class="field"><span>Verkehrsmittel</span>
+              <select id="line-prod">
+                <option value="">Alle</option>
+                <option value="tram">Straßenbahn / Stadtbahn</option>
+                <option value="subway">U-Bahn</option>
+                <option value="bus">Bus</option>
+                <option value="suburban">S-Bahn</option>
+                <option value="regional">Regionalverkehr (RB/RE)</option>
+                <option value="national">Fernverkehr (ICE/IC)</option>
+              </select>
+            </label>
+            <label class="field"><span>Pünktlichkeit</span>
+              <select id="f-punct">
+                <option value="">Alle</option>
+                <option value="95">sehr gut (ab 95 %)</option>
+                <option value="90">gut (ab 90 %)</option>
+                <option value="80-90">mittel (80–90 %)</option>
+                <option value="-80">schlecht (unter 80 %)</option>
+                <option value="-65">sehr schlecht (unter 65 %)</option>
+              </select>
+            </label>
+            <label class="field"><span>Ausfälle</span>
+              <select id="f-cancel">
+                <option value="">Alle</option>
+                <option value="0">keine Ausfälle</option>
+                <option value="2">mehr als 2 %</option>
+                <option value="5">mehr als 5 %</option>
+                <option value="10">mehr als 10 %</option>
+              </select>
+            </label>
+            <label class="field"><span>Mindestens … Fahrten</span>
+              <select id="f-min">
+                <option value="1">alle (auch sehr wenige)</option>
+                <option value="10" selected>10 (Standard)</option>
+                <option value="30">30</option>
+                <option value="100">100</option>
+                <option value="500">500</option>
+              </select>
+            </label>
+          </div>
+          <button type="button" id="f-reset" style="width:100%">Filter zurücksetzen</button>
+        </details>
+        <div class="seg" role="tablist" id="line-src" style="margin-top:10px">
+          <button data-src="all" class="on">Alle Daten</button>
+          <button data-src="local">Nur dieses Handy</button>
+          <button data-src="remote">Nur Server-Statistik</button>
+        </div>
+        <p class="muted small" id="lines-meta"></p>
+      </div>
+      <div id="lines-out"></div>
+    </section>
+
+    <!-- SETTINGS -->
+    <section id="tab-settings" class="tab" aria-label="Einstellungen">
+      <div class="card">
+        <h2>Einstellungen</h2>
+        <label class="field"><span>Pünktlich heißt: weniger als … Minuten Verspätung</span>
+          <input id="set-thr" type="number" min="1" max="10" value="3" inputmode="numeric">
+        </label>
+        <label class="field"><span>Echtzeit-API (MOTIS / Transitous)</span>
+          <input id="set-api" type="url" value="https://api.transitous.org">
+        </label>
+        <label class="field"><span>Server-Statistik (stats.json, optional)</span>
+          <input id="set-remote" type="url" placeholder="https://raw.githubusercontent.com/…/stats.json">
+        </label>
+        <label class="check"><input type="checkbox" id="set-collect" checked> Favoriten alle 3 Min. mitprotokollieren, solange die App offen ist</label>
+        <button class="primary" id="set-save">Speichern</button>
+      </div>
+      <div class="card">
+        <h2>Daten auf diesem Handy</h2>
+        <p id="data-info" class="muted"></p>
+        <div class="row gap">
+          <button id="data-export">Exportieren</button>
+          <button id="data-clear" class="danger">Löschen</button>
+        </div>
+      </div>
+      <div class="card small muted">
+        <h2>So wird gerechnet</h2>
+        <p><b>Live:</b> Abfahrten, Verspätungen und Ausfälle kommen von Transitous (freie Auskunft auf Basis der deutschlandweiten DELFI-Fahrplan- und Echtzeitdaten, inkl. KVB-Stadtbahn und Busse).</p>
+        <p><b>Statistik:</b> (1) Die letzten 90 Minuten jeder abgefragten Haltestelle (tatsächliche Verspätungen). (2) Alles, was dieses Handy je beobachtet hat. (3) Optional eine Server-Statistik, die ein GitHub-Workflow alle 15 Minuten sammelt.</p>
+        <p><b>Wahrscheinlichkeit:</b> 3000 simulierte Fahrten pro Verbindung. Je Fahrt werden Verspätungen aus der echten Verteilung der jeweiligen Linie gezogen; Ausfälle und verpasste Umstiege kosten einen Takt Wartezeit. Gibt es schon eine Live-Verspätung, wird sie eingerechnet.</p>
+        <p>Inoffiziell, keine Gewähr. Daten: Transitous / DELFI.</p>
+      </div>
+    </section>
+  </main>
+
+  <nav class="tabs" role="tablist">
+    <button data-tab="route" class="on" role="tab"><span aria-hidden="true">⏰</span>Wann los?</button>
+    <button data-tab="stop" role="tab"><span aria-hidden="true">🚋</span>Abfahrten</button>
+    <button data-tab="lines" role="tab"><span aria-hidden="true">📊</span>Statistik</button>
+    <button data-tab="settings" role="tab"><span aria-hidden="true">⚙</span>Mehr</button>
+  </nav>
+
+  <div id="tip" class="tip" role="tooltip" hidden></div>
+  <script src="stats.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
