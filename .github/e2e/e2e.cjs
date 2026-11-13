@@ -10,7 +10,7 @@ const { chromium } = require('playwright-core');
   const txt = async (sel) => (await page.textContent(sel)).replace(/\s+/g, ' ').trim();
   // Haltestelle
   await page.click('[data-tab=stop]');
-  await page.fill('#stop-q', 'Neumarkt');
+  await page.fill('#stop-q', 'Hamburg Hbf');
   await page.waitForSelector('#stop-suggest li[data-i]', { timeout: 20000 });
   console.log('VORSCHLAEGE:', await txt('#stop-suggest'));
   await page.click('#stop-suggest li[data-i]');
@@ -20,12 +20,12 @@ const { chromium } = require('playwright-core');
   await page.screenshot({ path: 'stop.png', fullPage: true });
   // Route
   await page.click('[data-tab=route]');
-  await page.fill('#from', 'Neumarkt'); await page.waitForSelector('#from-suggest li[data-i]'); await page.click('#from-suggest li[data-i]');
-  await page.fill('#to', 'Ebertplatz'); await page.waitForSelector('#to-suggest li[data-i]'); await page.click('#to-suggest li[data-i]');
+  await page.fill('#from', 'Köln Hbf'); await page.waitForSelector('#from-suggest li[data-i]'); await page.click('#from-suggest li[data-i]');
+  await page.fill('#to', 'Hamburg Hbf'); await page.waitForSelector('#to-suggest li[data-i]'); await page.click('#to-suggest li[data-i]');
   await page.click('#route-form button.primary');
   await page.waitForSelector('#route-out .hero, #route-out .err, #route-out .card', { timeout: 60000 });
   await page.waitForSelector('#route-out .hero, #route-out .err', { timeout: 60000 }).catch(() => {});
-  console.log('ROUTE:', (await txt('#route-out')).slice(0, 2500));
+  console.log('ROUTE:', (await txt('#route-out')).slice(0, 3000));
   await page.screenshot({ path: 'route.png', fullPage: true });
   // Linien
   await page.click('[data-tab=lines]'); await page.waitForTimeout(500);

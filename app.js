@@ -21,6 +21,9 @@
   let local = store.get('pk.lines', {});          // key -> Aggregat
   let seen = store.get('pk.seen', {});            // obsId -> zeitstempel (Dedupe)
   let remote = store.get('pk.remote', null);      // {generated, lines}
+  // alte Schlüssel ohne Verkehrsbetrieb verwerfen (vor der Deutschland-Erweiterung)
+  for (const k of Object.keys(local)) if (k.split('|').length < 3) delete local[k];
+  if (remote && remote.lines) for (const k of Object.keys(remote.lines)) if (k.split('|').length < 3) delete remote.lines[k];
 
   // ---------- Hilfen ----------
   const hm = (ms) => new Date(ms).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Berlin' });
@@ -41,12 +44,13 @@
   };
   function normLine(line) {
     if (!line) return null;
-    const product = line.product || 'unknown';
-    let name = String(line.name || line.fahrtNr || '?').trim();
-    name = name.replace(/^(STR|Str|Tram|Stadtbahn|Bus|BUS|U|S|RB|RE|ICE|IC|EC|AST|TaxiBus)\s+/, '').trim() || name;
-    return { key: `${product}|${name}`, name, product, label: (product === 'suburban' || product === 'regional' || product === 'regionalExpress') ? (line.name || name) : name };
+    const { name, product } = S.normLineName(line.name || line.fahrtNr, line.product || 'unknown');
+    const agency = String(line.agency || '').trim();
+    return { key: `${product}|${name}|${agency}`, name, product, agency, label: name };
   }
   const productName = (p) => PRODUCT[p] || p;
+  // "Bahn 18", aber "RE8", "S11", "ICE" ohne doppelte Gattung
+  const lineTitle = (l) => (/^(S|U|RE|RB|ICE|ICD|IC|EC|ECE|NJ|RJX?|FLX|FlixBus)/i.test(l.label || l.name) ? (l.label || l.name) : `${productName(l.product)} ${l.label || l.name}`);
 
   // ---------- API ----------
   const cache = new Map();
@@ -106,12 +110,12 @@
       const isStop = x.type === 'STOP';
       const name = x.type === 'ADDRESS' ? [x.street || x.name, x.houseNumber].filter(Boolean).join(' ') + (city ? ', ' + city : '') : x.name;
       return { type: isStop ? 'stop' : 'location', poi: x.type === 'PLACE', id: x.id, name, address: name, latitude: x.lat, longitude: x.lon, city, d: distKm(x.lat, x.lon) };
-    }).filter((x, _, all) => x.d < 60 || !all.some((y) => y.d < 60)); // nur Köln & Umgebung, falls vorhanden
+    }).map((x, i) => ({ ...x, i })).sort((a, b) => ((a.d < 60 ? 0 : 1) - (b.d < 60 ? 0 : 1)) || a.i - b.i); // Köln & Umgebung zuerst, sonst ganz Deutschland
   }
 
   function normDep(s) {
     const pl = s.place || {};
-    const line = normLine({ name: s.routeShortName || s.displayName || s.tripShortName, product: MODE[s.mode] || 'unknown' });
+    const line = normLine({ name: s.routeShortName || s.displayName || s.tripShortName, product: MODE[s.mode] || 'unknown', agency: s.agencyName });
     const planned = Date.parse(pl.scheduledDeparture || pl.departure);
     const when = pl.departure ? Date.parse(pl.departure) : null;
     const cancelled = !!(s.cancelled || s.tripCancelled || pl.cancelled);
@@ -149,7 +153,7 @@
         return {
           ...base,
           departureDelay: l.realTime ? (Date.parse(dep) - Date.parse(pDep)) / 1000 : null,
-          line: { name: l.routeShortName || l.displayName || l.tripShortName || '?', product: MODE[l.mode] || 'unknown' },
+          line: { name: l.routeShortName || l.displayName || l.tripShortName || '?', product: MODE[l.mode] || 'unknown', agency: l.agencyName },
           direction: l.headsign || '', cancelled: !!(l.cancelled || l.tripCancelled),
           departurePlatform: l.from?.track || l.from?.scheduledTrack || '',
         };
@@ -168,7 +172,8 @@
   }
 
   // Vergangene Abfahrten haben endgültige Verspätungen → in die Statistik
-  const isFinal = (d, now) => d.cancelled ? d.planned < now : (d.planned + (d.delayMin || 0) * 60e3) < now - 2 * 60e3;
+  // nur die letzten 3 Stunden – ältere Echtzeitdaten sind oft nicht mehr verlässlich
+  const isFinal = (d, now) => d.planned > now - 3 * 3600e3 && (d.cancelled ? d.planned < now : (d.planned + (d.delayMin || 0) * 60e3) < now - 2 * 60e3);
 
   function record(deps) {
     const now = Date.now();
@@ -176,7 +181,7 @@
     for (const d of deps) {
       if (!isFinal(d, now) || seen[d.id]) continue;
       seen[d.id] = now;
-      const a = local[d.line.key] || (local[d.line.key] = S.newAgg(d.line.key, d.line.label, d.line.product));
+      const a = local[d.line.key] || (local[d.line.key] = S.newAgg(d.line.key, d.line.label, d.line.product, d.line.agency));
       S.addObs(a, { planned: d.planned, delayMin: d.delayMin, cancelled: d.cancelled });
       added++;
     }
@@ -192,7 +197,7 @@
     const now = Date.now(), out = {};
     for (const d of deps) {
       if (!isFinal(d, now)) continue;
-      const a = out[d.line.key] || (out[d.line.key] = S.newAgg(d.line.key, d.line.label, d.line.product));
+      const a = out[d.line.key] || (out[d.line.key] = S.newAgg(d.line.key, d.line.label, d.line.product, d.line.agency));
       S.addObs(a, { planned: d.planned, delayMin: d.delayMin, cancelled: d.cancelled });
     }
     return out;
@@ -205,7 +210,9 @@
       const r = await fetch(cfg.remote, { cache: 'no-cache' });
       if (!r.ok) throw new Error(r.status);
       const j = await r.json();
-      remote = { generated: j.generated, lines: j.lines || {}, stops: j.stops || [], fetched: Date.now() };
+      const lines = j.lines || {};
+      for (const k of Object.keys(lines)) if (k.split('|').length < 3) delete lines[k];
+      remote = { generated: j.generated, lines, fetched: Date.now() };
       store.set('pk.remote', remote);
     } catch (e) { console.warn('Server-Statistik nicht ladbar', e); }
   }
@@ -344,7 +351,7 @@
     if (input._picked) return input._picked;
     const q = input.value.trim();
     if (!q) throw new Error('Bitte Start und Ziel eingeben.');
-    const res = await searchLocations(/köln|koeln/i.test(q) ? q : q + ' Köln');
+    const res = await searchLocations(q);
     if (!res.length) throw new Error(`„${q}“ nicht gefunden.`);
     input._picked = res[0]; input.value = res[0].name || res[0].address;
     return res[0];
@@ -424,9 +431,9 @@
     const near = ts.filter((t) => Math.abs(t - around) < 90 * 60e3);
     const gaps = [];
     for (let i = 1; i < near.length; i++) if (near[i] - near[i - 1] > 60e3) gaps.push(near[i] - near[i - 1]);
-    if (!gaps.length) return line.product === 'bus' ? 20 * 60e3 : 10 * 60e3;
+    if (!gaps.length) return ({ bus: 20, tram: 10, subway: 10, suburban: 20, regional: 60, regionalExpress: 60, national: 120, nationalExpress: 60 }[line.product] || 20) * 60e3;
     gaps.sort((a, b) => a - b);
-    return Math.min(60 * 60e3, gaps[Math.floor(gaps.length / 2)]);
+    return Math.min(120 * 60e3, gaps[Math.floor(gaps.length / 2)]);
   }
 
   // ---------- ROUTE ----------
@@ -557,7 +564,7 @@
         const deps = depsBy.get(l.origin?.id) || [];
         // Statistik dieser Linie: Verlauf (Handy + Server) + letzte 90 Min. an dieser Haltestelle
         const recent = aggFromDeps(deps.filter((d) => d.line.key === line.key))[line.key];
-        let agg = S.mergeAgg(merged[line.key] || null, recent || null);
+        let agg = S.mergeAgg(merged[line.key] || null, recent || null) || S.newAgg(line.key, line.label, line.product, line.agency);
         let basis = 'Linie';
         let n = S.summary(agg).tot;
         if (n < 15) {
@@ -588,7 +595,7 @@
     const minsTo = Math.round((rec.leave - now) / 60e3);
     const recLegs = rec.info.filter((x) => !x.walk);
     const firstLeg = recLegs[0];
-    const how = recLegs.map((x) => `${productName(x.line.product)} ${x.line.label}`).join(' → ');
+    const how = recLegs.map((x) => lineTitle(x.line)).join(' → ');
     const verdict = !recOK ? 'Riskant – keine Verbindung ist sicher genug. Lieber früher los!'
       : rec.sim.p >= 0.95 ? 'Sehr sicher 👍' : rec.sim.p >= 0.9 ? 'Sicher' : 'Etwas Puffer einplanen';
     const biggest = [['Ausfall', rec.sim.rCancel], ['verpasster Umstieg', rec.sim.rMiss], ['Verspätung', rec.sim.rDelay]].sort((x, y) => y[1] - x[1])[0];
@@ -744,22 +751,24 @@
     if (openKey && lines[openKey]) {
       const a = lines[openKey];
       out.innerHTML = `<button id="back" style="margin-bottom:12px">← Alle Linien</button>` +
-        lineProfileHTML(a, `${productName(a.product)} ${a.name}`, { sub: lineSrc === 'local' ? 'Nur auf diesem Handy beobachtete Fahrten' : lineSrc === 'remote' ? 'Server-Statistik' : 'Handy + Server-Statistik' });
+        lineProfileHTML(a, lineTitle(a), { sub: (a.agency ? a.agency + ' · ' : '') + (lineSrc === 'local' ? 'Nur auf diesem Handy beobachtete Fahrten' : lineSrc === 'remote' ? 'Server-Statistik' : 'Handy + Server-Statistik') });
       $('#back').onclick = () => { openKey = null; renderLines(); };
       return;
     }
     const q = $('#line-q').value.trim().toLowerCase();
     const rows = Object.values(lines).map((a) => ({ a, s: S.summary(a, cfg.thr) }))
-      .filter((r) => r.s.tot > 0 && (!q || r.a.name.toLowerCase() === q || r.a.name.toLowerCase().startsWith(q) || productName(r.a.product).toLowerCase().includes(q)))
+      .filter((r) => r.s.tot > 0 && (!q || r.a.name.toLowerCase() === q || r.a.name.toLowerCase().startsWith(q) || productName(r.a.product).toLowerCase().includes(q) || (q.length > 2 && (r.a.agency || '').toLowerCase().includes(q))))
       .sort((x, y) => (x.a.product === y.a.product ? x.a.name.localeCompare(y.a.name, 'de', { numeric: true }) : order(x.a.product) - order(y.a.product)));
     if (!rows.length) {
       out.innerHTML = `<div class="card"><p>Noch keine Statistik${q ? ' für diese Linie' : ''}.</p><p class="muted small">Sie entsteht automatisch: Jede Haltestellen- oder Routenabfrage wertet die Fahrten der letzten 90 Minuten aus und speichert sie. Merke dir Haltestellen als Favorit, dann werden sie protokolliert, solange die App offen ist. Für eine durchgehende Statistik richte die Server-Statistik ein (README).</p></div>`;
       return;
     }
+    const shown = q ? rows.slice(0, 300) : [...rows].sort((x, y) => y.s.tot - x.s.tot).slice(0, 80)
+      .sort((x, y) => (x.a.product === y.a.product ? x.a.name.localeCompare(y.a.name, 'de', { numeric: true }) : order(x.a.product) - order(y.a.product)));
     out.innerHTML = `<div class="card"><table class="stats"><thead><tr><th>Linie</th><th>Pünktlich</th><th>Ausfall</th><th>Ø Min.</th><th>Fahrten</th></tr></thead><tbody>
-      ${rows.map((r) => `<tr class="click" data-key="${esc(r.a.key)}"><td><span class="badge">${esc(r.a.name)}</span> <span class="muted small">${productName(r.a.product)}</span></td>
+      ${shown.map((r) => `<tr class="click" data-key="${esc(r.a.key)}"><td><span class="badge">${esc(r.a.name)}</span> <span class="muted small">${productName(r.a.product)}</span>${r.a.agency ? `<div class="muted small">${esc(r.a.agency)}</div>` : ''}</td>
       <td><span class="status ${level(r.s.punct).cls}">${pct(r.s.punct)}</span></td><td>${pct(r.s.cancel, 1)}</td><td>${num(r.s.mean)}</td><td>${r.s.tot}</td></tr>`).join('')}
-      </tbody></table><p class="note">Antippen für das Zuverlässigkeitsprofil.</p></div>`;
+      </tbody></table><p class="note">${rows.length > shown.length ? `Die ${shown.length} meistbeobachteten von ${rows.length} Linien. Suche oben nach Linie, Stadt oder Verkehrsbetrieb. ` : ''}Antippen für das Zuverlässigkeitsprofil.</p></div>`;
     $$('tr.click', out).forEach((tr) => tr.onclick = () => openLine(tr.dataset.key));
   }
   const order = (p) => ['tram', 'subway', 'bus', 'suburban', 'regional', 'regionalExpress'].indexOf(p) + 1 || 9;

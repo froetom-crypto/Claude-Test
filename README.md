@@ -1,6 +1,8 @@
-# Pünktlich Köln
+# Pünktlich (Deutschland)
 
-Handy-Web-App (PWA) für die **Verspätungsstatistik von KVB-Stadtbahn und Bussen** in Köln und für die Frage:
+**App öffnen:** https://froetom-crypto.github.io/Claude-Test/
+
+Handy-Web-App (PWA) für die **Verspätungsstatistik von Bus, Straßenbahn, U-Bahn, S-Bahn, Regional- und Fernverkehr in ganz Deutschland** und für die Frage:
 **Wann muss ich losgehen, damit ich pünktlich bin – und wie wahrscheinlich komme ich zu spät?**
 
 ## Funktionen
@@ -18,7 +20,7 @@ Handy-Web-App (PWA) für die **Verspätungsstatistik von KVB-Stadtbahn und Busse
 * **Statistik:** Eine öffentliche Schnittstelle mit historischen KVB-Verspätungen gibt es nicht. Die Statistik wird deshalb aus echten Beobachtungen aufgebaut:
   1. Jede Abfrage wertet auch die **Abfahrten der letzten 90 Minuten** an der Haltestelle aus. Deren Verspätungen stehen dann schon fest. So gibt es sofort eine Statistik.
   2. Alles, was das Handy einmal beobachtet hat, wird **lokal gespeichert**. Favoriten werden alle 3 Minuten mitprotokolliert, solange die App offen ist.
-  3. Optional gibt es eine **Server-Statistik**: Der GitHub-Workflow `.github/workflows/collect-stats.yml` sammelt alle 15 Minuten die tatsächlichen Abfahrten an rund 20 zentralen Kölner Haltestellen (`collector/stops.json`). Er schreibt sie in `stats.json` auf den Branch `stats-data`. So entsteht eine Statistik rund um die Uhr, auch wenn die App zu ist.
+  3. Optional gibt es eine **Server-Statistik**: Der GitHub-Workflow `.github/workflows/collect-stats.yml` sammelt alle 15 Minuten die tatsächlichen Abfahrten an rund 50 großen Knoten in ganz Deutschland (`collector/stops.json`); Linien werden je Verkehrsbetrieb getrennt gezählt. Er schreibt sie in `stats.json` auf den Branch `stats-data`. So entsteht eine Statistik rund um die Uhr, auch wenn die App zu ist.
 
 ## Wie die Wahrscheinlichkeit berechnet wird
 

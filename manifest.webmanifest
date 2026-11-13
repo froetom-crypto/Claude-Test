@@ -1,7 +1,7 @@
 {
-  "name": "Pünktlich Köln",
+  "name": "Pünktlich Deutschland",
   "short_name": "Pünktlich",
-  "description": "Verspätungsstatistik und Abfahrtsplanung für KVB-Stadtbahn und Busse in Köln",
+  "description": "Verspätungsstatistik und Abfahrtsplanung für Bahn, S-Bahn, Straßenbahn und Bus in ganz Deutschland",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

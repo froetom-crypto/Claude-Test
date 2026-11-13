@@ -1,5 +1,5 @@
 // App-Shell offline verfügbar machen; API-Antworten werden nie gecacht (immer live)
-const V = 'pk-v4';
+const V = 'pk-v5';
 const SHELL = ['./', 'index.html', 'styles.css', 'stats.js', 'app.js', 'manifest.webmanifest', 'icon.svg'];
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(V).then((c) => c.addAll(SHELL))); self.skipWaiting(); });
 self.addEventListener('activate', (e) => {
