@@ -32,13 +32,14 @@
 
     <details class="card" id="settings">
       <summary>Einstellungen &amp; Funktionsweise</summary>
+      <p class="hint"><b>Zwei Wege, je nachdem ob ein Schlüssel eingetragen ist:</b></p>
+      <p class="hint"><b>Kostenlos (ohne Schlüssel):</b> Eine Bild-KI (CLIP) läuft direkt auf deinem Gerät. Eine deutsche Beschreibung wird vorher automatisch ins Englische übersetzt. Beim ersten Mal werden ca. 200&ndash;300 MB Modelldaten geladen (am besten im WLAN), danach geht es schneller. Gut für das Hauptmotiv, bei feinen Details (Anzahl, wer macht was) ungenauer.</p>
+      <p class="hint"><b>Genauer (mit Anthropic-API-Schlüssel):</b> Claude macht aus der Beschreibung passende englische Suchbegriffe und Subreddits, schaut sich jedes Bild an und gibt 0&ndash;100 Punkte mit Begründung. Kosten grob 0,05&ndash;0,15 € pro Suche.</p>
       <label class="field">
-        <span>Anthropic-API-Schlüssel (für die genaue KI-Bewertung)</span>
-        <input id="key" type="password" placeholder="sk-ant-…" spellcheck="false">
+        <span>Anthropic-API-Schlüssel (optional)</span>
+        <input id="key" type="password" placeholder="leer lassen für die kostenlose Variante" spellcheck="false">
       </label>
-      <p class="hint">Der Schlüssel wird nur in diesem Browser gespeichert (localStorage) und direkt an api.anthropic.com geschickt. Ohne Schlüssel sucht die Seite nur über die Reddit-Suche mit deinem Text und sortiert nach Titel-Übereinstimmung &ndash; deutlich ungenauer.</p>
-      <p class="hint"><b>So funktioniert es:</b> 1. Claude übersetzt deine Beschreibung in mehrere englische Suchbegriffe und passende Subreddits. 2. Die Seite holt dazu Bildbeiträge von Reddit (bis zu 40 Kandidaten). 3. Claude schaut sich jedes Bild an und vergibt 0&ndash;100 Punkte, wie genau es deiner Beschreibung entspricht. Die 5 besten werden angezeigt.</p>
-      <p class="hint">Kosten pro Suche mit Schlüssel: grob 0,05&ndash;0,15 € (Bilder werden in kleiner Vorschaugröße bewertet).</p>
+      <p class="hint">Der Schlüssel wird nur in diesem Browser gespeichert und direkt an api.anthropic.com geschickt. Ohne Schlüssel werden Bilder, die Reddit nicht direkt freigibt, über den freien Bild-Proxy wsrv.nl geladen.</p>
     </details>
   </main>
 

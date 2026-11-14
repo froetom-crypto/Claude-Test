@@ -60,3 +60,12 @@ export function prefilter(cands, keywords, n) {
   };
   return [...cands].map((c) => ({ c, r: rank(c) })).sort((a, b) => b.r - a.r).slice(0, n).map((x) => x.c);
 }
+
+// Suchanfragen ohne Claude: von genau (alle Hauptwörter) bis breit (ODER-Verknüpfung).
+export function buildQueries(english) {
+  const kw = words(english);
+  if (!kw.length) return [english];
+  const q = [kw.slice(0, 4).join(' '), kw.slice(0, 2).join(' ')];
+  if (kw.length > 1) q.push(kw.slice(0, 6).join(' OR '));
+  return [...new Set(q)];
+}

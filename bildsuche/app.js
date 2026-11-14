@@ -1,6 +1,6 @@
 // Reddit-Bildsuche: Beschreibung eingeben -> Kandidaten von Reddit holen -> Claude bewertet die Bilder -> Top 5
 import { Anthropic, jsonSchemaOutputFormat } from './vendor/anthropic-sdk.js';
-import { extractImages, prefilter, words } from './reddit.js';
+import { extractImages, prefilter, words, buildQueries } from './reddit.js';
 
 const MODEL = 'claude-opus-5-5';
 const MAX_CANDIDATES = 40;
@@ -15,7 +15,6 @@ const store = {
 };
 
 $('key').value = store.get(KEY_STORE);
-if (!$('key').value) $('settings').open = true;
 $('key').addEventListener('change', () => store.set(KEY_STORE, $('key').value.trim()));
 
 function status(text, err = false) {
@@ -205,22 +204,44 @@ function render(list) {
   }
 }
 
+// ---------- Ablauf ohne API-Schlüssel: KI im Browser ----------
+const LOCAL_CANDIDATES = 48;
+
+async function searchLocal(desc, nsfw) {
+  if (typeof WebAssembly !== 'object') throw new Error('Dieser Browser kann die Bild-KI nicht ausführen (kein WebAssembly).');
+  const ai = await import('./local-ai.js');
+
+  status('1/3 Bereite die Suche vor …');
+  const english = await ai.toEnglish(desc, status);
+  const queries = buildQueries(english);
+
+  status(`2/3 Suche auf Reddit: ${queries.map((q) => `„${q}“`).join(', ')} …`);
+  const cands = await collectCandidates(queries, [], nsfw);
+  if (!cands.length) { status(`Reddit hat keine Bildbeiträge zu „${english}“ geliefert. Beschreibung anders formulieren?`); return; }
+
+  const pool = prefilter(cands, words(english), LOCAL_CANDIDATES);
+  status(`3/3 Bild-KI prüft ${pool.length} Bilder …`);
+  const sims = await ai.rankWithClip(english, pool, status);
+
+  const top = pool
+    .map((it, i) => ({ it, s: sims[i] }))
+    .filter((x) => x.s != null)
+    .sort((a, b) => b.s - a.s)
+    .slice(0, TOP)
+    .map(({ it, s }) => ({ ...it, score: ai.simToPercent(s) }));
+  render(top);
+  status(top.length
+    ? `Die ${top.length} ähnlichsten von ${pool.length} Bildern (kostenlose Bild-KI im Browser, gesucht nach „${english}“). Mit API-Schlüssel wird die Bewertung genauer.`
+    : 'Die Bilder konnten nicht geladen werden.', !top.length);
+}
+
 // ---------- Ablauf ----------
 async function search(desc, nsfw) {
   const apiKey = $('key').value.trim();
   store.set(KEY_STORE, apiKey);
   $('results').replaceChildren();
 
-  if (!apiKey) {
-    status('Ohne API-Schlüssel: suche nur per Reddit-Textsuche …');
-    const cands = await collectCandidates([desc], [], nsfw);
-    const top = prefilter(cands, words(desc), TOP);
-    render(top);
-    status(top.length
-      ? `${top.length} Treffer nach Titel sortiert (ohne Bildprüfung). Für genaue Ergebnisse unten einen API-Schlüssel eintragen.`
-      : 'Keine Bildbeiträge gefunden. Tipp: englische Begriffe verwenden oder einen API-Schlüssel eintragen.');
-    return;
-  }
+  if (!apiKey) return searchLocal(desc, nsfw);
 
   const c = client(apiKey);
   status('1/3 Claude bereitet die Suchbegriffe vor …');
