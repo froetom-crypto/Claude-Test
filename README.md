@@ -46,6 +46,20 @@ Vereinfachungen: Die Verspätung bei der Ankunft wird gleich der Verspätung bei
 
 Der Branch `stats-data` enthält immer nur einen einzigen Commit. Er wird bei jedem Lauf ersetzt, damit das Repository nicht wächst.
 
+## Reddit-Bildsuche
+
+**Öffnen:** https://froetom-crypto.github.io/Claude-Test/bildsuche/
+
+Eigene Seite im Ordner `bildsuche/`: Du gibst eine Bildbeschreibung ein (gern auf Deutsch), und die Seite sucht die **5 Bilder auf Reddit, die am genauesten passen**.
+
+1. Claude macht aus der Beschreibung 3 englische Suchbegriffe und bis zu 3 passende Subreddits.
+2. Die Seite holt die Bildbeiträge direkt von Reddit (bis zu 40 Kandidaten; Videos, Textbeiträge und standardmäßig NSFW werden aussortiert).
+3. Claude schaut sich jedes Bild an (Vorschau mit 640 px) und vergibt 0–100 Punkte, wie genau es zu jedem Detail der Beschreibung passt. Die 5 besten werden mit Begründung angezeigt.
+
+Dafür braucht die Seite einen **Anthropic-API-Schlüssel** (unter „Einstellungen“ eintragen). Er bleibt nur im Browser und geht nur an api.anthropic.com. Kosten grob 0,05–0,15 € pro Suche. Ohne Schlüssel gibt es nur die Reddit-Textsuche, sortiert nach Titel, ohne Bildprüfung.
+
+Dateien: `bildsuche/index.html`, `app.js` (Ablauf und Claude-Aufrufe), `reddit.js` (Reddit-Daten auswerten), `vendor/anthropic-sdk.js` (offizielles Anthropic-SDK 1.3.0, für den Browser gebündelt).
+
 ## Dateien
 
 * `index.html`, `styles.css`, `app.js`: die App

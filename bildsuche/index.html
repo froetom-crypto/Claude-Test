@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1a1a19">
+  <title>Reddit-Bildsuche</title>
+  <link rel="icon" href="../icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <h1>Reddit-Bildsuche</h1>
+    <a class="back" href="../">← Pünktlich</a>
+  </header>
+
+  <main>
+    <form id="search" class="card" autocomplete="off">
+      <label class="field">
+        <span>Bildbeschreibung</span>
+        <textarea id="desc" rows="4" required
+          placeholder="z. B. Eine rote Katze schläft auf einer Fensterbank, draußen schneit es"></textarea>
+      </label>
+      <div class="row">
+        <label class="check"><input type="checkbox" id="nsfw"> NSFW-Beiträge zulassen</label>
+        <button type="submit" id="go">5 passende Bilder suchen</button>
+      </div>
+    </form>
+
+    <p id="status" class="status" aria-live="polite"></p>
+    <ol id="results" class="results"></ol>
+
+    <details class="card" id="settings">
+      <summary>Einstellungen &amp; Funktionsweise</summary>
+      <label class="field">
+        <span>Anthropic-API-Schlüssel (für die genaue KI-Bewertung)</span>
+        <input id="key" type="password" placeholder="sk-ant-…" spellcheck="false">
+      </label>
+      <p class="hint">Der Schlüssel wird nur in diesem Browser gespeichert (localStorage) und direkt an api.anthropic.com geschickt. Ohne Schlüssel sucht die Seite nur über die Reddit-Suche mit deinem Text und sortiert nach Titel-Übereinstimmung &ndash; deutlich ungenauer.</p>
+      <p class="hint"><b>So funktioniert es:</b> 1. Claude übersetzt deine Beschreibung in mehrere englische Suchbegriffe und passende Subreddits. 2. Die Seite holt dazu Bildbeiträge von Reddit (bis zu 40 Kandidaten). 3. Claude schaut sich jedes Bild an und vergibt 0&ndash;100 Punkte, wie genau es deiner Beschreibung entspricht. Die 5 besten werden angezeigt.</p>
+      <p class="hint">Kosten pro Suche mit Schlüssel: grob 0,05&ndash;0,15 € (Bilder werden in kleiner Vorschaugröße bewertet).</p>
+    </details>
+  </main>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
