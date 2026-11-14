@@ -1,0 +1,26 @@
+name: Bildsuche testen (echter Browser, echtes Reddit, ohne API-Schlüssel)
+on:
+  workflow_dispatch:
+  push:
+    branches: [ccr-2fb6385d-mau7ew]
+    paths: ['bildsuche/**', '.github/e2e/bildsuche.cjs', '.github/workflows/bildsuche-test.yml']
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Bildsuche im echten Browser
+        run: |
+          npm i --no-save --silent playwright-core@1.48.2
+          python3 -m http.server 8080 >/dev/null 2>&1 &
+          sleep 1
+          node .github/e2e/bildsuche.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshot
+          path: '*.png'
