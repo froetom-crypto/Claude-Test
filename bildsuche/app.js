@@ -33,16 +33,38 @@ async function redditSearch(query, { sub, nsfw }) {
   return r.json();
 }
 
+// Ersatz, wenn Reddit Abfragen aus dem Browser blockiert: PullPush, ein freies Reddit-Archiv mit CORS-Freigabe.
+async function pullpushSearch(query, { sub, nsfw }) {
+  const p = new URLSearchParams({ q: query.replace(/ OR /g, ' | '), size: '100' });
+  if (sub) p.set('subreddit', sub);
+  if (!nsfw) p.set('over_18', 'false');
+  const r = await fetch(`https://api.pullpush.io/reddit/search/submission/?${p}`);
+  if (!r.ok) throw new Error(`PullPush ${r.status}`);
+  const j = await r.json();
+  return { data: { children: (j.data || []).map((d) => ({ data: d })) } };
+}
+
+let redditBlocked = false;
+async function searchPosts(query, opts) {
+  if (!redditBlocked) {
+    try { return await redditSearch(query, opts); } catch (e) { redditBlocked = true; console.warn('Reddit direkt nicht erreichbar, nehme PullPush:', e.message); }
+  }
+  return pullpushSearch(query, opts);
+}
+
 async function collectCandidates(queries, subreddits, nsfw) {
   const jobs = [
     ...queries.slice(0, 3).map((q) => ({ q })),
     ...subreddits.slice(0, 3).map((sub) => ({ q: queries[0], sub })),
   ];
-  const settled = await Promise.allSettled(jobs.map((j) => redditSearch(j.q, { sub: j.sub, nsfw })));
+  // erst eine Anfrage, damit klar ist, ob Reddit direkt geht; dann der Rest parallel
+  const first = await Promise.allSettled([searchPosts(jobs[0].q, { sub: jobs[0].sub, nsfw })]);
+  const rest = await Promise.allSettled(jobs.slice(1).map((j) => searchPosts(j.q, { sub: j.sub, nsfw })));
+  const settled = [...first, ...rest];
   const ok = settled.filter((s) => s.status === 'fulfilled');
   if (!ok.length) {
     const why = settled.map((s) => s.reason?.message).filter(Boolean)[0] || 'unbekannt';
-    throw new Error(`Reddit war nicht erreichbar (${why}). Evtl. blockiert ein Werbe-/Tracking-Blocker oder Reddit drosselt gerade – kurz warten und nochmal versuchen.`);
+    throw new Error(`Reddit war nicht erreichbar (${why}). Bitte kurz warten und nochmal versuchen.`);
   }
   const byId = new Map();
   for (const s of ok) {

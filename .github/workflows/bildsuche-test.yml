@@ -13,6 +13,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Quellen direkt prüfen
+        continue-on-error: true
+        run: |
+          curl -sS -o /dev/null -w "Reddit: %{http_code}\n" -A "Mozilla/5.0" "https://www.reddit.com/search.json?q=red+cat&limit=5"
+          curl -sS -m 30 "https://api.pullpush.io/reddit/search/submission/?q=red+cat+window&size=3" -D - | head -c 1500; echo
       - name: Bildsuche im echten Browser
         run: |
           npm i --no-save --silent playwright-core@1.48.2

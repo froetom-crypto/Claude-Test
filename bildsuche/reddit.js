@@ -8,6 +8,8 @@ export function words(text) {
   return [...new Set(String(text).toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 2 && !STOP.has(w)))];
 }
 
+const unescapeUrl = (u) => String(u).replace(/&amp;/g, '&');
+
 // Größte Variante bis max. 640 px Breite (spart Tokens), sonst das Original.
 function pickPreview(resolutions, source) {
   const fit = (resolutions || []).filter((r) => r.width <= 640);
@@ -37,6 +39,7 @@ export function extractImages(listing, { nsfw = false } = {}) {
       preview = pi ? pickPreview(pi.resolutions, pi.source) : full;
     }
     if (!full || !preview) continue;
+    full = unescapeUrl(full); preview = unescapeUrl(preview);
     out.push({
       id: p.id,
       title: p.title || '',
