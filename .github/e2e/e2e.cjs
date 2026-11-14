@@ -2,7 +2,8 @@
 const { chromium } = require('playwright-core');
 (async () => {
   const b = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args: ['--no-sandbox'] });
-  const page = await b.newPage({ viewport: { width: 390, height: 844 }, locale: 'de-DE', timezoneId: 'Europe/Berlin' });
+  const ctx = await b.newContext({ viewport: { width: 390, height: 844 }, locale: 'de-DE', timezoneId: 'Europe/Berlin', geolocation: { latitude: 50.9357, longitude: 6.9470 }, permissions: ['geolocation'] });
+  const page = await ctx.newPage();
   page.on('pageerror', (e) => console.log('PAGEERROR', e.message));
   page.on('console', (m) => m.type() !== 'log' && console.log('CONSOLE', m.type(), m.text()));
   page.on('response', (r) => r.url().includes('transitous') && console.log('API', r.status(), r.url().slice(0, 160)));
@@ -10,6 +11,8 @@ const { chromium } = require('playwright-core');
   const txt = async (sel) => (await page.textContent(sel)).replace(/\s+/g, ' ').trim();
   // Haltestelle
   await page.click('[data-tab=stop]');
+  await page.waitForSelector('#stop-out .dep', { timeout: 30000 }).catch(() => {});
+  console.log('NAEHE:', (await txt('#tab-stop')).slice(0, 700));
   await page.fill('#stop-q', 'Hamburg Hbf');
   await page.waitForSelector('#stop-suggest li[data-i]', { timeout: 20000 });
   console.log('VORSCHLAEGE:', await txt('#stop-suggest'));
@@ -26,6 +29,7 @@ const { chromium } = require('playwright-core');
   await page.waitForSelector('#route-out .hero, #route-out .err, #route-out .card', { timeout: 60000 });
   await page.waitForSelector('#route-out .hero, #route-out .err', { timeout: 60000 }).catch(() => {});
   console.log('ROUTE:', (await txt('#route-out')).slice(0, 1800));
+  const rk = await page.$('.risk'); console.log('RISIKO:', rk ? (await rk.textContent()).replace(/\s+/g, ' ').slice(0, 900) : 'FEHLT');
   const cmp = await page.$('#compare [data-mode=regional]'); if (cmp) { await cmp.click(); await page.waitForTimeout(300); console.log('REGIONAL:', (await txt('#route-out')).slice(0, 1200)); } else console.log('KEIN VERGLEICH');
   await page.click('[data-tab=lines]'); await page.waitForTimeout(300); console.log('BETRIEBE:', (await txt('#lines-out')).slice(0, 800));
   await page.click('[data-view=cities]'); await page.waitForTimeout(300); console.log('STAEDTE:', (await txt('#lines-out')).slice(0, 600));

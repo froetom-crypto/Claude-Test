@@ -13,7 +13,7 @@
     del(k) { try { localStorage.removeItem(k); } catch { /* egal */ } },
   };
 
-  const DEFAULTS = { thr: 3, api: 'https://api.transitous.org', remote: 'https://raw.githubusercontent.com/froetom-crypto/Claude-Test/stats-data/stats.json', collect: true };
+  const DEFAULTS = { geo: true, thr: 3, api: 'https://api.transitous.org', remote: 'https://raw.githubusercontent.com/froetom-crypto/Claude-Test/stats-data/stats.json', collect: true };
   let cfg = { ...DEFAULTS, ...store.get('pk.cfg', {}) };
   if (/transport\.rest/.test(cfg.api)) cfg.api = DEFAULTS.api; // alte, abgeschaltete Schnittstelle
   if (!cfg.remote) cfg.remote = DEFAULTS.remote;
@@ -40,7 +40,7 @@
 
   const PRODUCT = {
     tram: 'Bahn', subway: 'U-Bahn', bus: 'Bus', suburban: 'S-Bahn', regional: 'RB',
-    regionalExpress: 'RE', national: 'IC', nationalExpress: 'ICE', ferry: 'Fähre', taxi: 'Taxi',
+    regionalExpress: 'RE', national: 'IC', nationalExpress: 'ICE', ferry: 'Fähre', taxi: 'Taxi', unknown: 'Linie',
   };
   function normLine(line) {
     if (!line) return null;
@@ -389,39 +389,47 @@
   function simulate(legs, target, startAt, N = 3000) {
     const rnd = mulberry(12345 + legs.length);
     let ok = 0, rCancel = 0, rMiss = 0, rDelay = 0;
-    const arrivals = [];
+    const arrivals = [], lateMin = [];
+    const cancelBy = new Array(legs.length).fill(0), missBy = new Array(legs.length).fill(0), delayBy = new Array(legs.length).fill(0);
     const now = Date.now();
     for (let it = 0; it < N; it++) {
-      let ready = startAt, cancelHit = false, missHit = false;
-      for (const L of legs) {
+      let ready = startAt, cancelHit = false, missHit = false, cancelLeg = -1, missLeg = -1, worstLeg = -1, worstD = -1;
+      for (let li = 0; li < legs.length; li++) {
+        const L = legs[li];
         if (!L.transit) { ready = Math.max(ready, L.dep) + (L.arr - L.dep); continue; }
         const run = L.arr - L.dep;
         let k = 0, actDep;
         for (; k < 6; k++) {
           const planned = L.dep + k * L.headway;
           const known = k === 0 && L.liveDelay != null && L.dep - now < 45 * 60e3;
-          if (k === 0 && L.cancelled) { cancelHit = true; continue; }
-          if (!known && rnd() < L.dist.pc) { if (planned + 60e3 >= ready) cancelHit = true; continue; }
+          if (k === 0 && L.cancelled) { cancelHit = true; if (cancelLeg < 0) cancelLeg = li; continue; }
+          if (!known && rnd() < L.dist.pc) { if (planned + 60e3 >= ready) { cancelHit = true; if (cancelLeg < 0) cancelLeg = li; } continue; }
           let d;
           if (known) d = Math.max(Math.min(0, L.liveDelay), L.liveDelay + (sampleDelaySec(L.dist, rnd) - (L.dist.median + 0.5) * 60) * 0.5);
           else d = sampleDelaySec(L.dist, rnd);
           actDep = planned + d * 1000;
-          if (actDep >= ready) break;
-          if (k === 0) missHit = true;
+          if (actDep >= ready) { if (d > worstD) { worstD = d; worstLeg = li; } break; }
+          if (k === 0) { missHit = true; if (missLeg < 0) missLeg = li; }
         }
         if (actDep == null) actDep = L.dep + 6 * L.headway;
         ready = actDep + run;
       }
       arrivals.push(ready);
       if (ready <= target) ok++;
-      else if (cancelHit) rCancel++;
-      else if (missHit) rMiss++;
-      else rDelay++;
+      else {
+        lateMin.push((ready - target) / 60e3);
+        if (cancelHit) { rCancel++; if (cancelLeg >= 0) cancelBy[cancelLeg]++; }
+        else if (missHit) { rMiss++; if (missLeg >= 0) missBy[missLeg]++; }
+        else { rDelay++; if (worstLeg >= 0) delayBy[worstLeg]++; }
+      }
     }
+    lateMin.sort((a, b) => a - b);
     arrivals.sort((a, b) => a - b);
     return {
       p: ok / N, rCancel: rCancel / N, rMiss: rMiss / N, rDelay: rDelay / N,
       p50: arrivals[Math.floor(N * 0.5)], p90: arrivals[Math.floor(N * 0.9)],
+      lateMedian: lateMin.length ? lateMin[Math.floor(lateMin.length / 2)] : 0,
+      cancelBy, missBy, delayBy,
     };
   }
 
@@ -644,7 +652,7 @@
       <div class="sub">${minsTo >= 0 ? (minsTo < 120 ? `in ${minsTo} Min. · ` : '') : ''}${esc(how)}${firstLeg ? ` ab ${esc(firstLeg.l.origin?.name)} um ${hm(firstLeg.dep)}` : ''}</div>
       <div class="verdict">${statusTag(rec.sim.p, `${pct(rec.sim.p)} pünktlich`)}</div>
       <div class="verdict">${verdict}</div>
-      ${1 - rec.sim.p >= 0.01 ? `<div class="why">Größtes Risiko: ${biggest[0]}</div>` : ''}
+      ${1 - rec.sim.p >= 0.01 ? `<div class="why">Größtes Risiko: <b>${biggest[0]}</b> (${pct(biggest[1])}) – Erklärung unten</div>` : ''}
       ${firstLeg && (firstLeg.cancelled || (firstLeg.live || 0) >= 180) ? `<div class="why"><b>Live:</b> ${firstLeg.cancelled ? 'Diese Fahrt fällt aus!' : `${firstLeg.line.label} hat gerade +${Math.round(firstLeg.live / 60)} Min.`}</div>` : ''}
       <div class="row center"><button id="save-route" class="chip">☆ Strecke merken</button></div>
     </div>`;
@@ -682,6 +690,52 @@
     if (cmp) cmp.onclick = (e) => { const b = e.target.closest('[data-mode]'); if (b) { setMode(b.dataset.mode); renderResult(); } };
   }
 
+  // Verständliche Erklärung, woraus sich die Pünktlichkeits-Chance zusammensetzt
+  function riskHTML(e, target, full) {
+    const { sim, info } = e;
+    const pctR = (x) => (x < 0.005 && x > 0 ? '< 1 %' : pct(x));
+    const argmax = (arr) => arr.reduce((bi, v, i) => (v > arr[bi] ? i : bi), 0);
+    const lastTransitArr = (i) => { for (let j = i - 1; j >= 0; j--) if (!info[j].walk) return j; return -1; };
+    // Umstiegszeit vor Teilstrecke i (inkl. Fußweg dazwischen)
+    const slack = (i) => {
+      const p = lastTransitArr(i); if (p < 0) return null;
+      let walk = 0; for (let j = p + 1; j < i; j++) walk += (info[j].arr - info[j].dep);
+      return Math.round((info[i].dep - info[p].arr - walk) / 60e3);
+    };
+    const arrPlanned = Date.parse(e.j.legs.at(-1).plannedArrival || e.j.legs.at(-1).arrival);
+    const buffer = Math.round((target - arrPlanned) / 60e3);
+    const seg = [
+      { k: 'ok', v: sim.p, cls: 'good', icon: '✓', label: 'pünktlich' },
+      { k: 'cancel', v: sim.rCancel, cls: 'critical', icon: '✕', label: 'Ausfall' },
+      { k: 'miss', v: sim.rMiss, cls: 'serious', icon: '⇄', label: 'Umstieg verpasst' },
+      { k: 'delay', v: sim.rDelay, cls: 'warn', icon: '⏱', label: 'Verspätung' },
+    ];
+    const bar = `<div class="riskbar" role="img" aria-label="${seg.map((x) => x.label + ' ' + pct(x.v)).join(', ')}">${seg.filter((x) => x.v > 0.001).map((x) =>
+      `<i class="rb-${x.cls}" style="flex:${x.v}" data-tip="${x.label}: ${pct(x.v, 1)}">${x.v >= 0.12 ? pct(x.v) : ''}</i>`).join('')}</div>`;
+    const items = [];
+    items.push(`<li><span class="rdot rb-good">✓</span><div><b>${pct(sim.p)} pünktlich</b> – In ${Math.round(sim.p * 100)} von 100 Fällen bist du bis ${hm(target)} am Ziel.</div></li>`);
+    if (sim.rCancel >= 0.005) {
+      const li = argmax(sim.cancelBy), x = info[li];
+      items.push(`<li><span class="rdot rb-critical">✕</span><div><b>${pctR(sim.rCancel)} Ausfall</b> – ${x && !x.walk ? `Am ehesten fällt <b>${esc(lineTitle(x.line))}</b> ab ${esc(x.l.origin?.name)} aus (diese Linie fällt zu ${pct(x.sum.cancel, 1)} aus). ` : 'Eine Fahrt fällt aus. '}Dann musst du auf die nächste warten${x && !x.walk ? ` – etwa ${Math.round(x.headway / 60e3)} Min. später` : ''}.</div></li>`);
+    }
+    if (sim.rMiss >= 0.005) {
+      const li = argmax(sim.missBy), x = info[li], sl = x ? slack(li) : null;
+      items.push(`<li><span class="rdot rb-serious">⇄</span><div><b>${pctR(sim.rMiss)} Umstieg verpasst</b> – ${x && !x.walk ? `In <b>${esc(x.l.origin?.name)}</b> hast du ${sl != null ? `nur <b>${sl} Min.</b>` : 'wenig Zeit'} zum Umsteigen in ${esc(lineTitle(x.line))}. Ist der Zug davor mehr als ${sl != null ? sl : 'ein paar'} Min. zu spät, ist der Anschluss weg und du nimmst den nächsten (ca. ${Math.round(x.headway / 60e3)} Min. später).` : 'Ein Anschluss wird knapp.'}</div></li>`);
+    }
+    if (sim.rDelay >= 0.005) {
+      const li = argmax(sim.delayBy), x = info[li];
+      items.push(`<li><span class="rdot rb-warn">⏱</span><div><b>${pctR(sim.rDelay)} zu spät durch Verspätung</b> – Alle Anschlüsse klappen, aber ${x && !x.walk ? `<b>${esc(lineTitle(x.line))}</b> ist` : 'die Fahrt ist'} so verspätet, dass dein Puffer von ${buffer} Min. nicht reicht.</div></li>`);
+    }
+    if (items.length === 1 && sim.p < 0.995) items.push(`<li><span class="rdot rb-warn">⏱</span><div>Kleines Restrisiko durch Verspätungen.</div></li>`);
+    // Umstiege mit ihrer Zeit auflisten
+    const transfers = info.map((x, i) => (!x.walk && lastTransitArr(i) >= 0 ? { x, sl: slack(i) } : null)).filter(Boolean);
+    const trHTML = transfers.length ? `<div class="note">Umstiege: ${transfers.map((t) => `${esc(t.x.l.origin?.name)} <b class="${t.sl != null && t.sl <= 5 ? 'tight' : ''}">${t.sl != null ? t.sl + ' Min.' : '?'}</b>`).join(' · ')}</div>` : '';
+    const arrival = `<div class="arrive">Ankunft <b>meist um ${hm(sim.p50)}</b>, in 9 von 10 Fällen bis ${hm(sim.p90)}${1 - sim.p >= 0.01 ? ` · wenn es schiefgeht, im Schnitt <b>${Math.max(1, Math.round(sim.lateMedian))} Min. zu spät</b>` : ''}</div>`;
+    if (!full) return bar + `<div class="legend">${seg.filter((x) => x.v >= 0.005).map((x) => `<span><i class="rdot sm rb-${x.cls}">${x.icon}</i>${x.label} ${pctR(x.v)}</span>`).join('')}</div>`;
+    return `<div class="risk"><h3>Wie sicher ist diese Verbindung?</h3>${bar}<ul class="risklist">${items.join('')}</ul>${arrival}${trHTML}
+      <details class="explain"><summary>Wie wird das berechnet?</summary><p class="small muted">Die App spielt diese Verbindung 3000-mal durch. Für jede Bahn und jeden Bus wird eine Verspätung aus der <b>echten Verspätungsstatistik</b> dieser Linie und dieses Verkehrsbetriebs gezogen, Ausfälle passieren so oft wie gemessen, und schon bekannte Live-Verspätungen werden eingerechnet. Verpasst du dabei einen Anschluss oder fällt eine Fahrt aus, wartest du auf die nächste. Gezählt wird, wie oft du rechtzeitig ankommst – das ist die Prozentzahl. Die farbigen Teile zeigen, <b>woran</b> es in den übrigen Fällen scheitert.</p></details></div>`;
+  }
+
   function journeyHTML(e, isRec, target) {
     const { sim, info } = e;
     const first = info[0], last = info[info.length - 1];
@@ -702,16 +756,12 @@
     }).join('');
     const arrPlanned = Date.parse(e.j.legs.at(-1).plannedArrival || e.j.legs.at(-1).arrival);
     const buffer = Math.round((target - arrPlanned) / 60e3);
-    const okW = sim.p * 100, cW = sim.rCancel * 100, mW = sim.rMiss * 100, dW = sim.rDelay * 100;
     return `<div class="card journey${isRec ? ' rec' : ''}">
       <div class="jhead"><div><div class="jtime">${hm(e.leave)} → ${hm(arrPlanned)}</div>
         <div class="muted small">${e.transfers <= 0 ? 'ohne Umstieg' : e.transfers + ' Umstieg' + (e.transfers > 1 ? 'e' : '')}${e.long ? '<span class="tag">ICE/IC</span>' : '<span class="tag">Regional</span>'} · ${buffer} Min. Puffer${isRec ? ' · <b>Empfehlung</b>' : ''}</div></div>
         <div style="text-align:right"><div class="prob">${pct(sim.p)}</div>${statusTag(sim.p)}</div></div>
-      <div class="meter" title="pünktlich / Ausfall / Umstieg verpasst / Verspätung">
-        <i style="width:${okW}%;background:var(--good)"></i><i style="width:${cW}%;background:var(--critical)"></i><i style="width:${mW}%;background:var(--serious)"></i><i style="width:${dW}%;background:var(--warn)"></i>
-      </div>
-      <div class="note">Ankunft wahrscheinlich ${hm(sim.p50)}, in 9 von 10 Fällen bis ${hm(sim.p90)} · Risiko: Ausfall ${pct(sim.rCancel)}, Umstieg verpasst ${pct(sim.rMiss)}, Verspätung ${pct(sim.rDelay)}</div>
-      <details><summary>Details</summary><ul class="legs">${legsHTML}</ul></details>
+      ${riskHTML(e, target, isRec)}
+      <details${isRec ? ' open' : ''}><summary>${isRec ? 'Fahrtverlauf' : 'Details'}</summary><ul class="legs">${legsHTML}</ul>${isRec ? '' : riskHTML(e, target, true)}</details>
     </div>`;
   }
 
@@ -721,20 +771,76 @@
   function renderFavChips() {
     $('#fav-chips').innerHTML = favs.map((f) => `<button class="chip" data-id="${esc(f.id)}">★ ${esc(f.name)}</button>`).join('');
   }
+  // ---- Standort: Haltestellen in der Nähe ----
+  let nearby = [], lastFix = 0, manualPickAt = 0, locating = false;
+  const fmtDist = (m) => (m < 1000 ? `${Math.round(m / 10) * 10} m` : `${(m / 1000).toFixed(1).replace('.', ',')} km`);
+  function getPosition() {
+    return new Promise((res, rej) => {
+      if (!navigator.geolocation) return rej(new Error('Standort wird von diesem Gerät nicht unterstützt.'));
+      navigator.geolocation.getCurrentPosition((p) => res(p.coords), (e) => rej(new Error(
+        e.code === 1 ? 'Standortzugriff nicht erlaubt – bitte in den Browser-Einstellungen erlauben oder oben eine Haltestelle suchen.'
+          : 'Standort gerade nicht verfügbar.')), { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 });
+    });
+  }
+  async function locateNearby(openNearest) {
+    if (locating) return; locating = true;
+    $('#near-status').textContent = 'Ermittle Standort …';
+    try {
+      const c = await getPosition();
+      const res = await api('/api/v1/reverse-geocode', { place: `${c.latitude},${c.longitude}`, type: 'STOP' }, 30e3);
+      const k = Math.cos(c.latitude * Math.PI / 180) * 111e3;
+      const byName = new Map();
+      for (const x of Array.isArray(res) ? res : []) {
+        if (x.type !== 'STOP' || !Number.isFinite(x.lat)) continue;
+        const d = Math.hypot((x.lat - c.latitude) * 111e3, (x.lon - c.longitude) * k);
+        const prev = byName.get(x.name);
+        if (!prev || d < prev.d) byName.set(x.name, { id: x.id, name: x.name, d });
+      }
+      nearby = [...byName.values()].filter((x) => x.d < 2000).sort((a, b) => a.d - b.d).slice(0, 6);
+      lastFix = Date.now();
+      $('#near-status').textContent = nearby.length
+        ? `${nearby.length} Haltestelle${nearby.length > 1 ? 'n' : ''} im Umkreis · Stand ${hm(lastFix)}${c.accuracy > 150 ? ` · Standort ungenau (±${Math.round(c.accuracy)} m)` : ''}`
+        : 'Keine Haltestelle im Umkreis von 2 km gefunden.';
+      renderNear();
+      const wantsAuto = openNearest && nearby.length && Date.now() - manualPickAt > 10 * 60e3;
+      if (wantsAuto && (!currentStop || currentStop.id !== nearby[0].id)) { $('#stop-q').value = ''; openStop(nearby[0], true); }
+    } catch (e) {
+      $('#near-status').textContent = e.message;
+    } finally { locating = false; }
+  }
+  function renderNear() {
+    $('#near-chips').innerHTML = nearby.map((x) => `<button class="chip${currentStop && currentStop.id === x.id ? ' on' : ''}" data-near="${esc(x.id)}">${esc(x.name.replace(/^(Köln|Hamburg|Berlin|München|Frankfurt) /, ''))} <small>${fmtDist(x.d)}</small></button>`).join('');
+  }
+  function maybeLocate() {
+    if (cfg.geo === false || !$('#tab-stop').classList.contains('active') || document.hidden) return;
+    if (Date.now() - lastFix > 2 * 60e3) locateNearby(true);
+  }
+
   function initStop() {
-    attachSuggest($('#stop-q'), $('#stop-suggest'), (x) => openStop({ id: x.id, name: x.name }), { stopsOnly: true });
+    attachSuggest($('#stop-q'), $('#stop-suggest'), (x) => { manualPickAt = Date.now(); openStop({ id: x.id, name: x.name }); }, { stopsOnly: true });
+    $('#near-btn').addEventListener('click', () => { manualPickAt = 0; lastFix = 0; locateNearby(true); });
+    $('#near-chips').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-near]'); if (!b) return;
+      const x = nearby.find((n) => n.id === b.dataset.near); if (x) { manualPickAt = Date.now(); openStop(x); }
+    });
+    if (cfg.geo === false) $('#near-status').textContent = 'Automatischer Standort ist ausgeschaltet (Mehr → Einstellungen). Tippe auf „Standort aktualisieren“.';
+    setInterval(maybeLocate, 60e3);
+    document.addEventListener('visibilitychange', maybeLocate);
     $('#fav-chips').addEventListener('click', (e) => {
       const b = e.target.closest('[data-id]'); if (!b) return;
-      const f = favs.find((x) => x.id === b.dataset.id); if (f) { $('#stop-q').value = f.name; openStop(f); }
+      const f = favs.find((x) => x.id === b.dataset.id); if (f) { manualPickAt = Date.now(); $('#stop-q').value = f.name; openStop(f); }
     });
     renderFavChips();
   }
-  async function openStop(stop) {
-    currentStop = stop;
+  let lastStopRender = 0;
+  async function openStop(stop, auto) {
+    currentStop = { ...stop, auto: !!auto };
+    renderNear();
     clearInterval(stopTimer);
     stopOut.innerHTML = `<div class="loading">Lade Abfahrten …</div>`;
     await renderStop();
-    stopTimer = setInterval(() => currentStop === stop && !document.hidden && $('#tab-stop').classList.contains('active') && renderStop(), 60e3);
+    const me = currentStop;
+    stopTimer = setInterval(() => currentStop === me && !document.hidden && $('#tab-stop').classList.contains('active') && renderStop(), 30e3);
   }
   async function renderStop() {
     const stop = currentStop; const now = Date.now();
@@ -749,9 +855,11 @@
         .sort((x, y) => x.a.name.localeCompare(y.a.name, 'de', { numeric: true }));
       const tot = Object.values(recent).reduce((acc, a) => S.mergeAgg(acc, a), null);
       const ts = tot ? S.summary(tot, cfg.thr) : null;
-      let html = `<div class="card"><div class="jhead"><h2>${esc(stop.name)}</h2>
+      lastStopRender = Date.now();
+      let html = `<div class="card"><div class="jhead"><div><h2 style="margin:0">${esc(stop.name)}</h2><div class="muted small">${stop.auto ? '📍 nächste Haltestelle · ' : ''}${stop.d != null ? fmtDist(stop.d) + ' entfernt · ' : ''}aktualisiert ${new Date(lastStopRender).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Europe/Berlin' })} · automatisch alle 30 s</div></div>
         <button id="fav-toggle" class="chip">${isFav ? '★ Favorit' : '☆ Merken'}</button></div>
         ${ts && ts.tot ? `<p class="small" style="margin:4px 0 0">Letzte 90 Min.: ${statusTag(ts.punct, pct(ts.punct) + ' pünktlich')} · ${pct(ts.cancel, 1)} Ausfälle · ${ts.tot} Fahrten</p>` : ''}</div>`;
+      html += `<div class="card"><h3>Nächste Abfahrten</h3>${upcoming.length ? upcoming.map(depHTML).join('') : '<p class="muted">Keine Abfahrten in der nächsten Stunde.</p>'}</div>`;
       if (rows.length) {
         html += `<div class="card"><h3>Zuverlässigkeit je Linie</h3>
         <table class="stats"><thead><tr><th>Linie</th><th>Letzte 90 Min.</th><th>Ausfall</th><th>Langfristig</th></tr></thead><tbody>
@@ -760,7 +868,6 @@
           <td>${r.hist ? pct(r.hist.punct) + ` <span class="muted small">(${r.hist.tot})</span>` : '–'}</td></tr>`).join('')}
         </tbody></table><p class="note">Pünktlich = weniger als ${cfg.thr} Min. Verspätung und nicht ausgefallen. Antippen für das Profil.</p></div>`;
       }
-      html += `<div class="card"><h3>Nächste Abfahrten</h3>${upcoming.length ? upcoming.map(depHTML).join('') : '<p class="muted">Keine Abfahrten in der nächsten Stunde.</p>'}</div>`;
       stopOut.innerHTML = html;
       $('#fav-toggle').onclick = () => {
         favs = isFav ? favs.filter((f) => f.id !== stop.id) : favs.concat([{ id: stop.id, name: stop.name }]);
@@ -771,6 +878,7 @@
       stopOut.innerHTML = `<div class="card err"><b>Fehler:</b> ${esc(e.message)}</div>`;
     }
   }
+  const inMin = (t) => { const m = Math.round((t - Date.now()) / 60e3); return m <= 0 ? 'jetzt' : m < 60 ? `in ${m} Min.` : ''; };
   function depHTML(d) {
     const t = d.when || d.planned;
     const dl = d.cancelled ? '<span class="cancel">fällt aus</span>'
@@ -779,7 +887,7 @@
       : `<span class="delay ok">${d.delayMin >= 1 ? '+' + Math.floor(d.delayMin) : 'pünktlich'}</span>`;
     return `<div class="dep"><span class="badge">${esc(d.line.label)}</span>
       <div>${esc(d.direction)}<div class="muted small">${productName(d.line.product)}${d.platform ? ' · Steig ' + esc(d.platform) : ''} · ${dl}</div></div>
-      <div class="t">${d.cancelled ? `<s>${hm(d.planned)}</s>` : `<b>${hm(t)}</b>${d.when && hm(d.when) !== hm(d.planned) ? `<s>${hm(d.planned)}</s>` : ''}`}</div></div>`;
+      <div class="t">${d.cancelled ? `<s>${hm(d.planned)}</s>` : `<span class="in">${inMin(t)}</span><b>${hm(t)}</b>${d.when && hm(d.when) !== hm(d.planned) ? `<s>${hm(d.planned)}</s>` : ''}`}</div></div>`;
   }
 
   // ---------- LINIEN ----------
@@ -959,9 +1067,9 @@
 
   // ---------- EINSTELLUNGEN ----------
   function initSettings() {
-    $('#set-thr').value = cfg.thr; $('#set-api').value = cfg.api; $('#set-remote').value = cfg.remote; $('#set-collect').checked = cfg.collect;
+    $('#set-thr').value = cfg.thr; $('#set-api').value = cfg.api; $('#set-remote').value = cfg.remote; $('#set-collect').checked = cfg.collect; $('#set-geo').checked = cfg.geo !== false;
     $('#set-save').onclick = async () => {
-      cfg = { thr: Math.max(1, Math.min(5, Number($('#set-thr').value) || 3)), api: $('#set-api').value.trim() || DEFAULTS.api, remote: $('#set-remote').value.trim(), collect: $('#set-collect').checked };
+      cfg = { thr: Math.max(1, Math.min(5, Number($('#set-thr').value) || 3)), api: $('#set-api').value.trim() || DEFAULTS.api, remote: $('#set-remote').value.trim(), collect: $('#set-collect').checked, geo: $('#set-geo').checked };
       $('#set-thr').value = cfg.thr;
       store.set('pk.cfg', cfg); cache.clear();
       await loadRemote(true); dataInfo(); alert('Gespeichert.');
@@ -994,6 +1102,7 @@
     $$('.tab').forEach((t) => t.classList.toggle('active', t.id === 'tab-' + name));
     $$('.tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === name));
     if (name === 'lines') renderLines();
+    if (name === 'stop') maybeLocate();
     if (name === 'settings') dataInfo();
     try { sessionStorage.setItem('pk.tab', name); } catch { /* egal */ }
   }
