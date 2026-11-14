@@ -11,11 +11,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Diagnose Haltestellen in der Nähe
-        run: |
-          set +e
-          for u in "api/v1/map/stops?min=50.9330,6.9430&max=50.9390,6.9530" "api/v1/reverse-geocode?place=50.9358,6.9477&type=STOP" "api/v1/reverse-geocode?place=50.9358,6.9477"; do
-            echo "=== $u"; curl -sS -m 20 -w '\nHTTP %{http_code}\n' "https://api.transitous.org/$u" | head -c 1500; echo; done
       - name: Sammler gegen Live-API (Probelauf, nichts wird gespeichert)
         run: node collector/collect.mjs /tmp/stats.json && node -e "const s=require('/tmp/stats.json');const S=require('./stats.js');for(const a of Object.values(s.lines).sort((x,y)=>S.summary(y).tot-S.summary(x).tot).slice(0,25)){const m=S.summary(a);console.log(a.product,a.name,a.agency,'n='+m.tot,'puenktlich='+(m.punct*100).toFixed(0)+'%','ausfall='+(m.cancel*100).toFixed(1)+'%')}"
       - name: App im echten Browser mit Live-Daten

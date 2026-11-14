@@ -73,9 +73,14 @@
     <!-- STOP -->
     <section id="tab-stop" class="tab" aria-label="Haltestelle">
       <div class="card">
+        <div class="jhead"><h2>📍 In deiner Nähe</h2><button id="near-btn" class="chip" type="button">Standort aktualisieren</button></div>
+        <p class="muted small" id="near-status" style="margin:4px 0 8px">Ermittle Standort …</p>
+        <div class="chips" id="near-chips"></div>
+      </div>
+      <div class="card">
         <label class="field">
-          <span>Haltestelle</span>
-          <input id="stop-q" type="text" placeholder="z. B. Köln Neumarkt, Hamburg Hbf" autocomplete="off">
+          <span>Andere Haltestelle suchen</span>
+          <input id="stop-q" type="search" placeholder="z. B. Köln Neumarkt, Hamburg Hbf" autocomplete="off">
           <ul class="suggest" id="stop-suggest" role="listbox"></ul>
         </label>
         <div class="chips" id="fav-chips"></div>
@@ -182,6 +187,7 @@
         <label class="field"><span>Server-Statistik (stats.json, optional)</span>
           <input id="set-remote" type="url" placeholder="https://raw.githubusercontent.com/…/stats.json">
         </label>
+        <label class="check"><input type="checkbox" id="set-geo" checked> Abfahrten automatisch für meinen Standort zeigen</label>
         <label class="check"><input type="checkbox" id="set-collect" checked> Favoriten alle 3 Min. mitprotokollieren, solange die App offen ist</label>
         <button class="primary" id="set-save">Speichern</button>
       </div>
