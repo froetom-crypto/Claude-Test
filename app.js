@@ -40,7 +40,7 @@
 
   const PRODUCT = {
     tram: 'Bahn', subway: 'U-Bahn', bus: 'Bus', suburban: 'S-Bahn', regional: 'RB',
-    regionalExpress: 'RE', national: 'IC', nationalExpress: 'ICE', ferry: 'Fähre', taxi: 'Taxi',
+    regionalExpress: 'RE', national: 'IC', nationalExpress: 'ICE', ferry: 'Fähre', taxi: 'Taxi', unknown: 'Linie',
   };
   function normLine(line) {
     if (!line) return null;
