@@ -382,7 +382,9 @@ async function searchLocal(desc, nsfw) {
     const weakest = sParts.length ? Math.min(...sParts) : sFull;
     const s = sParts.length ? 0.5 * sFull + 0.3 * mean + 0.2 * weakest : sFull;
     return [{ ...it, vec: v, s, score: ai.cosToPercent(s) }];
-  }).sort((a, b) => b.s - a.s);
+  }).sort((a, b) => b.s - a.s)
+    // fast gleich aussehende Bilder (z. B. Serienfotos) nur einmal
+    .filter((r, i, all) => !all.slice(0, i).some((q) => ai.cos(q.vec, r.vec) > 0.95));
   if (!ranked.length) { status('Die Bilder konnten nicht geladen werden.', true); return; }
 
   const note = `${parts.length ? ` Geprüft auf: ${parts.map((p) => `„${p}“`).join(', ')}.` : ''}${failed.length ? ` Nicht erreichbar: ${failed.join(', ')}.` : ''}`;
