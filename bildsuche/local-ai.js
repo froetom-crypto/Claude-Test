@@ -44,12 +44,14 @@ async function loadClip(onStatus) {
 async function loadClipInner(onStatus) {
   const T = await loadLib();
   const progress_callback = progressTracker('Lade Bild-KI', onStatus);
-  const [tokenizer, processor, model] = await Promise.all([
+  const opts = { dtype: 'q8', device: 'wasm', progress_callback };
+  const [tokenizer, processor, textModel, visionModel] = await Promise.all([
     T.AutoTokenizer.from_pretrained(MODEL_ID, { progress_callback }),
     T.AutoProcessor.from_pretrained(MODEL_ID, { progress_callback }),
-    T.AutoModel.from_pretrained(MODEL_ID, { dtype: 'q8', device: 'wasm', progress_callback }),
+    T.SiglipTextModel.from_pretrained(MODEL_ID, opts),
+    T.SiglipVisionModel.from_pretrained(MODEL_ID, opts),
   ]);
-  clip = { tokenizer, processor, model };
+  clip = { tokenizer, processor, textModel, visionModel };
   return clip;
 }
 
@@ -89,14 +91,33 @@ async function loadImage(T, it) {
   throw err;
 }
 
-// Gibt für jedes Bild einen SigLIP-Wert zurück (Logit: je höher, desto besser passt es; grob -20 bis +5)
-// oder null, wenn das Bild nicht ladbar war.
-export async function rankWithClip(englishText, items, onStatus) {
+function unit(data) {
+  let n = 0;
+  for (const v of data) n += v * v;
+  n = Math.sqrt(n) || 1;
+  return Float32Array.from(data, (v) => v / n);
+}
+
+export function cos(a, b) {
+  let s = 0;
+  for (let i = 0; i < a.length; i++) s += a[i] * b[i];
+  return s;
+}
+
+// Text-"Fingerabdrücke" (normierte Vektoren) für mehrere Texte auf einmal
+export async function embedTexts(texts, onStatus) {
+  const m = await loadClip(onStatus);
+  const inputs = m.tokenizer(texts.map((t) => t.toLowerCase()), { padding: 'max_length', truncation: true });
+  const { pooler_output } = await m.textModel(inputs);
+  const dim = pooler_output.dims[1];
+  return texts.map((_, i) => unit(pooler_output.data.subarray(i * dim, (i + 1) * dim)));
+}
+
+// Bild-"Fingerabdrücke"; null, wenn ein Bild nicht ladbar war
+export async function embedImages(items, onStatus) {
   const T = await loadLib();
   const m = await loadClip(onStatus);
-  const text = m.tokenizer([englishText.toLowerCase()], { padding: 'max_length', truncation: true });
-
-  const scores = new Array(items.length).fill(null);
+  const vecs = new Array(items.length).fill(null);
   let done = 0;
   const BATCH = 8;
   for (let i = 0; i < items.length; i += BATCH) {
@@ -104,16 +125,16 @@ export async function rankWithClip(englishText, items, onStatus) {
     const loaded = await Promise.all(group.map((it) => loadImage(T, it).catch(() => null)));
     const ok = loaded.map((img, k) => ({ img, idx: i + k })).filter((x) => x.img);
     if (ok.length) {
-      const images = await m.processor(ok.map((x) => x.img));
-      const { logits_per_image } = await m.model({ ...text, ...images });
-      ok.forEach((x, k) => { scores[x.idx] = logits_per_image.data[k]; });
+      const inputs = await m.processor(ok.map((x) => x.img));
+      const { pooler_output } = await m.visionModel(inputs);
+      const dim = pooler_output.dims[1];
+      ok.forEach((x, k) => { vecs[x.idx] = unit(pooler_output.data.subarray(k * dim, (k + 1) * dim)); });
     }
     done += group.length;
     onStatus(`Bild-KI prüft ${items.length} Bilder … ${done}/${items.length}`);
   }
-  console.debug('SigLIP-Werte', items.map((it, i) => `${scores[i]?.toFixed(2)} ${it.title.slice(0, 40)}`).join(' | '));
-  return scores;
+  return vecs;
 }
 
-// SigLIP-Wert in Prozent umrechnen (-10 -> 0 %, -1 -> 100 %; sehr gute Treffer liegen um -2).
-export const simToPercent = (s) => Math.round(Math.max(0, Math.min(1, (s + 10) / 9)) * 100);
+// Ähnlichkeit Text/Bild in Prozent (SigLIP base: Logit ≈ 117 · cos − 12.9; −10 → 0 %, −1 → 100 %)
+export const cosToPercent = (c) => Math.round(Math.max(0, Math.min(1, (117 * c - 12.9 + 10) / 9)) * 100);

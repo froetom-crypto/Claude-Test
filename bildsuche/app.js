@@ -1,6 +1,6 @@
 // Reddit-Bildsuche: Beschreibung eingeben -> Kandidaten von Reddit holen -> Claude bewertet die Bilder -> Top 5
 import { Anthropic, jsonSchemaOutputFormat } from './vendor/anthropic-sdk.js';
-import { extractImages, prefilter, words, buildQueries, contentWords } from './reddit.js';
+import { extractImages, prefilter, words, buildQueries, contentWords, detailParts } from './reddit.js';
 import { searchWikimedia, searchOpenverse } from './sources.js';
 
 const MODEL = 'claude-opus-5-5';
@@ -151,14 +151,18 @@ async function gatherAll(queries, subreddits, nsfw, english) {
   const kw = contentWords(english);
   const q3 = kw.slice(0, 3).join(' ') || english;
   const q2 = kw.slice(0, 2).join(' ') || english;
-  const names = ['Reddit', 'Wikimedia Commons', 'Wikimedia Commons', 'Openverse'];
-  const res = await Promise.allSettled([
-    collectCandidates(queries, subreddits, nsfw, english),
-    searchWikimedia(q3),
-    q2 !== q3 ? searchWikimedia(q2) : Promise.resolve([]),
-    searchOpenverse(q3),
-  ]);
-  const val = (i) => (res[i].status === 'fulfilled' ? res[i].value : []);
+  // zusätzlich je Einzelheit eine Suche (z. B. "cat", "window sill"), damit mehr passende Kandidaten dabei sind
+  const partQ = detailParts(english).map((p) => contentWords(p).slice(0, 2).join(' ')).filter(Boolean);
+  const wmQ = [...new Set([q3, q2, ...partQ])].slice(0, 4);
+  const ovQ = [...new Set([q3, q2])];
+  const jobs = [
+    ['Reddit', collectCandidates(queries, subreddits, nsfw, english)],
+    ...wmQ.map((q) => ['Wikimedia Commons', searchWikimedia(q, 30)]),
+    ...ovQ.map((q) => ['Openverse', searchOpenverse(q)]),
+  ];
+  const names = jobs.map((j) => j[0]);
+  const res = await Promise.allSettled(jobs.map((j) => j[1]));
+  const valOf = (name) => res.flatMap((r, i) => (names[i] === name && r.status === 'fulfilled' ? r.value : []));
   const failed = [...new Set(res.map((r, i) => (r.status === 'rejected' ? `${names[i]} (${r.reason?.message || 'Fehler'})` : null)).filter(Boolean))];
   res.forEach((r, i) => r.status === 'rejected' && console.warn(names[i], r.reason?.message));
 
@@ -170,7 +174,7 @@ async function gatherAll(queries, subreddits, nsfw, english) {
     keys.forEach((k) => seen.add(k));
     return true;
   });
-  const groups = { reddit: uniq(val(0)), wikimedia: uniq([...val(1), ...val(2)]), openverse: uniq(val(3)) };
+  const groups = { reddit: uniq(valOf('Reddit')), wikimedia: uniq(valOf('Wikimedia Commons')), openverse: uniq(valOf('Openverse')) };
   return { groups, failed };
 }
 
@@ -289,9 +293,9 @@ async function rateAll(c, desc, items, onProgress) {
 }
 
 // ---------- Anzeige ----------
-function render(list) {
+function render(list, { append = false, onSimilar = null } = {}) {
   const ol = $('results');
-  ol.replaceChildren();
+  if (!append) { ol.replaceChildren(); $('more').hidden = true; }
   for (const it of list) {
     const li = document.createElement('li');
     li.className = 'card result';
@@ -335,6 +339,13 @@ function render(list) {
     if (it.credit) src.append(`${it.credit} · `);
     src.append(link);
     meta.append(src);
+    if (onSimilar) {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'similar';
+      b.textContent = 'Mehr wie dieses';
+      b.addEventListener('click', () => onSimilar(it));
+      meta.append(b);
+    }
 
     li.append(a, meta);
     ol.append(li);
@@ -342,7 +353,7 @@ function render(list) {
 }
 
 // ---------- Ablauf ohne API-Schlüssel: KI im Browser ----------
-const LOCAL_CANDIDATES = 48;
+const LOCAL_CANDIDATES = 64;
 
 async function searchLocal(desc, nsfw) {
   if (typeof WebAssembly !== 'object') throw new Error('Dieser Browser kann die Bild-KI nicht ausführen (kein WebAssembly).');
@@ -357,18 +368,53 @@ async function searchLocal(desc, nsfw) {
   const pool = balancedPool(groups, words(english), LOCAL_CANDIDATES);
   if (!pool.length) throw new Error(`Keine Bilder zu „${english}“ gefunden${failed.length ? ` (nicht erreichbar: ${failed.join(', ')})` : ''}. Beschreibung anders formulieren?`);
   status(`3/3 Bild-KI prüft ${pool.length} Bilder (${sourceSummary(groups)}) …`);
-  const sims = await ai.rankWithClip(english, pool, status);
 
-  const top = pool
-    .map((it, i) => ({ it, s: sims[i] }))
-    .filter((x) => x.s != null)
-    .sort((a, b) => b.s - a.s)
-    .slice(0, TOP)
-    .map(({ it, s }) => ({ ...it, score: ai.simToPercent(s) }));
-  render(top);
-  status(top.length
-    ? `Die ${top.length} passendsten von ${pool.length} Bildern aus Reddit, Wikimedia Commons und Openverse (Bild-KI im Browser, gesucht nach „${english}“).${failed.length ? ` Nicht erreichbar: ${failed.join(', ')}.` : ''}`
-    : 'Die Bilder konnten nicht geladen werden.', !top.length);
+  // Ganzer Satz + jede Einzelheit. Ein Bild muss möglichst ALLE Einzelheiten zeigen, um oben zu landen.
+  const parts = detailParts(english);
+  const [fullVec, ...partVecs] = await ai.embedTexts([english, ...parts], status);
+  const vecs = await ai.embedImages(pool, status);
+  const ranked = pool.flatMap((it, i) => {
+    const v = vecs[i];
+    if (!v) return [];
+    const sFull = ai.cos(fullVec, v);
+    const sParts = partVecs.map((p) => ai.cos(p, v));
+    const mean = sParts.length ? sParts.reduce((x, y) => x + y, 0) / sParts.length : sFull;
+    const weakest = sParts.length ? Math.min(...sParts) : sFull;
+    const s = sParts.length ? 0.5 * sFull + 0.3 * mean + 0.2 * weakest : sFull;
+    return [{ ...it, vec: v, s, score: ai.cosToPercent(s) }];
+  }).sort((a, b) => b.s - a.s);
+  if (!ranked.length) { status('Die Bilder konnten nicht geladen werden.', true); return; }
+
+  const note = `${parts.length ? ` Geprüft auf: ${parts.map((p) => `„${p}“`).join(', ')}.` : ''}${failed.length ? ` Nicht erreichbar: ${failed.join(', ')}.` : ''}`;
+  // "Mehr wie dieses": Text-Übereinstimmung und Ähnlichkeit zum gewählten Bild kombinieren
+  const z = (arr) => { const m = arr.reduce((a, b) => a + b, 0) / arr.length; const sd = Math.sqrt(arr.reduce((a, b) => a + (b - m) ** 2, 0) / arr.length) || 1; return arr.map((x) => (x - m) / sd); };
+  const onSimilar = (chosen) => {
+    const others = ranked.filter((r) => r.id !== chosen.id);
+    const zt = z(others.map((r) => r.s));
+    const zi = z(others.map((r) => ai.cos(r.vec, chosen.vec)));
+    const resorted = others.map((r, i) => ({ r, k: zt[i] + 1.2 * zi[i] })).sort((a, b) => b.k - a.k).map((x) => x.r);
+    showRanked([chosen, ...resorted], { text: `Bilder wie „${chosen.title.slice(0, 60)}“, die auch zur Beschreibung passen.${note}`, onSimilar });
+  };
+  showRanked(ranked, {
+    text: `Die passendsten von ${ranked.length} Bildern aus Reddit, Wikimedia Commons und Openverse (gesucht nach „${english}“).${note}`,
+    onSimilar,
+  });
+}
+
+// Ergebnisliste mit "Weitere 5 zeigen"; onSimilar (optional) zeigt den Knopf "Mehr wie dieses"
+function showRanked(ranked, { text, onSimilar }) {
+  let shown = 0;
+  $('results').replaceChildren();
+  const more = () => {
+    const next = ranked.slice(shown, shown + TOP);
+    shown += next.length;
+    render(next, { append: true, onSimilar });
+    $('more').hidden = shown >= ranked.length;
+  };
+  $('more').onclick = more;
+  more();
+  status(text);
+  window.scrollTo({ top: $('status').offsetTop - 8, behavior: 'smooth' });
 }
 
 // ---------- Ablauf ----------
