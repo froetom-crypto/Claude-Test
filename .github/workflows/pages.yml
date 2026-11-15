@@ -34,4 +34,5 @@ jobs:
         run: |
           sleep 60
           curl -sS -o /dev/null -w "Webseite: %{http_code}\n" https://froetom-crypto.github.io/Claude-Test/
+          curl -sS -o /dev/null -w "Bildsuche: %{http_code}\n" https://froetom-crypto.github.io/Claude-Test/bildsuche/
           curl -sS -o /dev/null -w "Statistik: %{http_code}\n" https://raw.githubusercontent.com/froetom-crypto/Claude-Test/stats-data/stats.json
