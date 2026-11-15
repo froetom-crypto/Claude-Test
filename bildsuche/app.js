@@ -38,11 +38,33 @@ async function redditSearch(query, { sub, nsfw }) {
 const ARCTIC = 'https://arctic-shift.photon-reddit.com/api';
 const GENERAL_SUBS = ['pics', 'itookapicture'];
 
+const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
+
+// Arctic Shift ist ein kostenloses Projekt: wenige Anfragen gleichzeitig, bei Überlastung kurz warten und wiederholen.
 async function arctic(path, params) {
-  const r = await fetch(`${ARCTIC}/${path}?${new URLSearchParams(params)}`);
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok || j.error) throw new Error(`Arctic Shift ${r.status}${j.error ? ': ' + j.error : ''}`);
-  return j.data || [];
+  const url = `${ARCTIC}/${path}?${new URLSearchParams(params)}`;
+  for (let attempt = 0; ; attempt++) {
+    const r = await fetch(url);
+    const j = await r.json().catch(() => ({}));
+    if (r.ok && !j.error) return j.data || [];
+    const retry = r.status === 422 || r.status === 429 || r.status >= 500;
+    if (!retry || attempt >= 2) throw new Error(`Arctic Shift ${r.status}${j.error ? ': ' + j.error : ''}`);
+    await sleep(2000 * (attempt + 1) + Math.random() * 1000);
+  }
+}
+
+// Führt Aufgaben mit höchstens `limit` gleichzeitig aus; `stop()` beendet vorzeitig.
+async function pool(tasks, limit, stop = () => false) {
+  const results = new Array(tasks.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < tasks.length && !stop()) {
+      const i = next++;
+      try { results[i] = { status: 'fulfilled', value: await tasks[i]() }; } catch (e) { results[i] = { status: 'rejected', reason: e }; }
+    }
+  };
+  await Promise.all(Array.from({ length: limit }, worker));
+  return results.filter(Boolean);
 }
 
 // Passendes Subreddit zu einem Stichwort, z. B. cat -> cats, dog -> dogpictures
@@ -61,20 +83,31 @@ const asListing = (posts) => ({ data: { children: posts.map((d) => ({ data: d })
 async function arcticCollect(englishText, extraSubs, nsfw) {
   const kw = contentWords(englishText);
   if (!kw.length) throw new Error('Bitte die Beschreibung etwas genauer formulieren.');
-  const found = await Promise.allSettled(kw.slice(0, 3).map((k) => subredditsFor(k, nsfw).then((subs) => subs.map((sub) => ({ sub, k })))));
+  const found = await pool(kw.slice(0, 3).map((k) => () => subredditsFor(k, nsfw).then((subs) => subs.map((sub) => ({ sub, k })))), 2);
   const topical = found.flatMap((f) => (f.status === 'fulfilled' ? f.value : []));
   for (const sub of extraSubs.slice(0, 3)) if (!topical.some((t) => t.sub.toLowerCase() === sub.toLowerCase())) topical.push({ sub, k: null });
+  const subs = topical.slice(0, 4);
 
-  const jobs = [];
-  for (const { sub, k } of topical.slice(0, 5)) {
+  // nur die letzten 2 Jahre: macht die Titelsuche in großen Subreddits viel schneller
+  const after = new Date(Date.now() - 2 * 365 * 864e5).toISOString().slice(0, 10);
+  const titled = [], latest = [];
+  for (const { sub, k } of subs) {
     const other = kw.find((w) => w !== k);
-    if (other) jobs.push({ subreddit: sub, title: other });
-    jobs.push(k ? { subreddit: sub } : { subreddit: sub, title: kw[0] });
+    if (other) titled.push({ subreddit: sub, title: other });
+    latest.push(k ? { subreddit: sub } : { subreddit: sub, title: kw[0] });
   }
-  for (const sub of GENERAL_SUBS) for (const w of kw.slice(0, 2)) jobs.push({ subreddit: sub, title: w });
+  const general = GENERAL_SUBS.flatMap((sub) => kw.slice(0, 2).map((w) => ({ subreddit: sub, title: w })));
+  // wichtigste zuerst
+  const jobs = [...titled, general[0], general[2], ...latest, general[1], general[3]].filter(Boolean);
 
-  const settled = await Promise.allSettled(jobs.map((j) => arctic('posts/search', { ...j, limit: '100' }).then(asListing)));
-  return { settled, subs: [...new Set(topical.map((t) => t.sub))] };
+  let images = 0, done = 0;
+  const settled = await pool(jobs.map((j) => async () => {
+    const listing = asListing(await arctic('posts/search', { ...j, after, limit: '100' }));
+    images += extractImages(listing, { nsfw }).length;
+    status(`Lade Reddit-Beiträge aus dem Archiv … ${++done}/${jobs.length} Anfragen, ${images} Bilder`);
+    return listing;
+  }), 2, () => images >= 150);
+  return { settled, subs: [...new Set(subs.map((t) => t.sub))] };
 }
 
 let redditBlocked = false;
@@ -95,7 +128,6 @@ async function collectCandidates(queries, subreddits, nsfw, englishText = querie
     status(`Reddit sperrt direkte Abfragen – suche über das Reddit-Archiv Arctic Shift …`);
     const r = await arcticCollect(englishText, subreddits, nsfw);
     settled = r.settled;
-    if (r.subs.length) status(`Suche in r/${r.subs.join(', r/')}, r/${GENERAL_SUBS.join(', r/')} …`);
   }
   const ok = settled.filter((s) => s.status === 'fulfilled');
   if (!ok.length) {
