@@ -7,32 +7,23 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - name: Bildquellen (Status, CORS, Antwort)
+      - name: Openverse-Vorschaubild (CORS)
         run: |
-          O="Origin: https://froetom-crypto.github.io"
-          for u in \
-            "https://api.openverse.org/v1/images/?q=red%20cat%20window&page_size=3" \
-            "https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*&generator=search&gsrnamespace=6&gsrsearch=red%20cat%20window&gsrlimit=3&prop=imageinfo&iiprop=url&iiurlwidth=640" \
-            ; do
-            echo "=================== $u"
-            curl -sS -m 30 -H "$O" -D /tmp/h -o /tmp/b "$u" || true
-            grep -iE "^HTTP|access-control-allow-origin" /tmp/h || true
-            head -c 700 /tmp/b; echo
-          done
-      - name: Modelle auf Hugging Face
+          id=$(curl -sS "https://api.openverse.org/v1/images/?q=cat&page_size=1" | python3 -c "import json,sys;print(json.load(sys.stdin)['results'][0]['id'])")
+          curl -sS -o /dev/null -D - -H "Origin: https://froetom-crypto.github.io" "https://api.openverse.org/v1/images/$id/thumb/" | grep -iE "^HTTP|access-control|content-type|location"
+      - name: Pollinations-Modelle mit Bild-Eingabe
         run: |
-          for m in onnx-community/siglip2-base-patch16-224-ONNX onnx-community/siglip2-base-patch16-256-ONNX Xenova/siglip-base-patch16-224 Xenova/clip-vit-base-patch16 Xenova/clip-vit-large-patch14 jinaai/jina-clip-v2 ; do
-            echo "=================== $m"
-            curl -sS -m 30 "https://huggingface.co/api/models/$m/tree/main/onnx" | python3 -c "import json,sys
-          try:
-            d=json.load(sys.stdin)
-            print([(x['path'], round(x.get('size',0)/1e6)) for x in d] if isinstance(d,list) else d)
-          except Exception as e: print('fehler', e)"
-          done
+          curl -sS -m 30 https://text.pollinations.ai/models | python3 -c "import json,sys
+          d=json.load(sys.stdin)
+          for m in d:
+            print(m.get('name'), '| vision:', m.get('vision'), '| input:', m.get('input_modalities'), '| tier:', m.get('tier'), '|', (m.get('description') or '')[:60])"
       - name: Kostenlose KI ohne Schlüssel (Pollinations)
         run: |
+          for model in openai-large gemini openai-fast mistral claude; do
+          echo "=========== $model"
           curl -sS -m 60 -H "Origin: https://froetom-crypto.github.io" -D /tmp/h -o /tmp/b https://text.pollinations.ai/openai \
             -H 'Content-Type: application/json' \
-            -d '{"model":"openai","messages":[{"role":"user","content":[{"type":"text","text":"What animal is in this picture? One word."},{"type":"image_url","image_url":{"url":"https://upload.wikimedia.org/wikipedia/commons/3/3a/Cat03.jpg"}}]}]}' || true
+            -d '{"model":"'$model'","messages":[{"role":"user","content":[{"type":"text","text":"What animal is in this picture? One word."},{"type":"image_url","image_url":{"url":"https://upload.wikimedia.org/wikipedia/commons/3/3a/Cat03.jpg"}}]}]}' || true
           grep -iE "^HTTP|access-control-allow-origin" /tmp/h || true
-          head -c 700 /tmp/b; echo
+          head -c 400 /tmp/b; echo
+          done
