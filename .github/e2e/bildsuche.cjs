@@ -39,8 +39,9 @@ const { chromium } = require('playwright-core');
   }
   const results = await page.$$eval('.result', (els) => els.map((e) => `${e.querySelector('.score')?.textContent} | ${e.querySelector('h2').textContent} | ${e.querySelector('.src')?.textContent} | ${e.querySelector('a').href}`));
   console.log('ERGEBNISSE:\n' + results.join('\n'));
-  console.log('BILDER GELADEN:', await page.$$eval('.result img', (els) => els.filter((i) => i.naturalWidth > 0).length), 'von', results.length);
-  await page.waitForTimeout(3000);
+  for (const img of await page.$$('.result img')) await img.scrollIntoViewIfNeeded().catch(() => {});
+  await page.waitForTimeout(5000);
+  console.log('BILDER GELADEN:', await page.$$eval('.result img', (els) => els.filter((i) => i.complete && i.naturalWidth > 0).length), 'von', results.length);
   await page.screenshot({ path: `bildsuche-${process.env.SHOT || 'x'}.png`, fullPage: true });
   await b.close();
   if (!results.length) process.exit(1);

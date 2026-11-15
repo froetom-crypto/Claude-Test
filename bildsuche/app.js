@@ -159,7 +159,7 @@ async function gatherAll(queries, subreddits, nsfw, english) {
     searchOpenverse(q3),
   ]);
   const val = (i) => (res[i].status === 'fulfilled' ? res[i].value : []);
-  const failed = [...new Set(res.map((r, i) => (r.status === 'rejected' ? names[i] : null)).filter(Boolean))];
+  const failed = [...new Set(res.map((r, i) => (r.status === 'rejected' ? `${names[i]} (${r.reason?.message || 'Fehler'})` : null)).filter(Boolean))];
   res.forEach((r, i) => r.status === 'rejected' && console.warn(names[i], r.reason?.message));
 
   const seen = new Set();
@@ -293,8 +293,11 @@ function render(list) {
     img.loading = 'lazy';
     img.alt = it.title;
     img.referrerPolicy = 'no-referrer';
-    img.src = it.full;
-    img.addEventListener('error', () => { if (img.src !== it.preview) img.src = it.preview; }, { once: true });
+    // Vorschau (ca. 640 px) spart Datenvolumen; das Original öffnet der Link.
+    const srcs = [it.preview, it.full, `https://wsrv.nl/?url=${encodeURIComponent(it.full)}&w=800&output=jpg`].filter((u, i, a) => u && a.indexOf(u) === i);
+    let si = 0;
+    img.src = srcs[0];
+    img.addEventListener('error', () => { if (++si < srcs.length) img.src = srcs[si]; });
     const a = document.createElement('a');
     a.href = it.permalink; a.target = '_blank'; a.rel = 'noopener';
     a.append(img);

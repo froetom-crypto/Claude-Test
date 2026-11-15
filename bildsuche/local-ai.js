@@ -115,5 +115,5 @@ export async function rankWithClip(englishText, items, onStatus) {
   return scores;
 }
 
-// SigLIP-Wert in Prozent umrechnen (-12 -> 0 %, -2 -> 100 %).
-export const simToPercent = (s) => Math.round(Math.max(0, Math.min(1, (s + 12) / 10)) * 100);
+// SigLIP-Wert in Prozent umrechnen (-10 -> 0 %, -1 -> 100 %; sehr gute Treffer liegen um -2).
+export const simToPercent = (s) => Math.round(Math.max(0, Math.min(1, (s + 10) / 9)) * 100);
