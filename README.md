@@ -46,6 +46,23 @@ Vereinfachungen: Die Verspätung bei der Ankunft wird gleich der Verspätung bei
 
 Der Branch `stats-data` enthält immer nur einen einzigen Commit. Er wird bei jedem Lauf ersetzt, damit das Repository nicht wächst.
 
+## Reddit-Bildsuche
+
+**Öffnen:** https://froetom-crypto.github.io/Claude-Test/bildsuche/
+
+Eigene Seite im Ordner `bildsuche/`: Du gibst eine Bildbeschreibung ein (gern auf Deutsch), und die Seite sucht die **5 Bilder auf Reddit, die am genauesten passen**.
+
+1. Claude macht aus der Beschreibung 3 englische Suchbegriffe und bis zu 3 passende Subreddits.
+2. Die Seite holt die Bildbeiträge direkt von Reddit (bis zu 40 Kandidaten; Videos, Textbeiträge und standardmäßig NSFW werden aussortiert).
+3. Die KI schaut sich jedes Bild an (Vorschau mit 640 px) und vergibt 0–100 Punkte, wie genau es zu jedem Detail der Beschreibung passt. Die 5 besten werden mit Begründung angezeigt.
+
+**Zwei Varianten:**
+
+* **Kostenlos, ohne Schlüssel (Standard):** Die KI läuft direkt im Browser ([Transformers.js](https://huggingface.co/docs/transformers.js)). Eine deutsche Beschreibung wird mit `Xenova/opus-mt-de-en` ins Englische übersetzt, daraus werden Suchbegriffe gebildet, und `Xenova/clip-vit-base-patch32` (CLIP) vergleicht die Beschreibung mit bis zu 48 Reddit-Bildern. Beim ersten Mal lädt der Browser ca. 200–300 MB Modelldaten von Hugging Face, danach kommen sie aus dem Cache. Bilder ohne CORS-Freigabe werden über den freien Bild-Proxy wsrv.nl geladen. Erkennt das Hauptmotiv gut, feine Details (Anzahl, wer macht was) schlechter.
+* **Genauer, mit Anthropic-API-Schlüssel** (unter „Einstellungen“): Claude macht Suchbegriffe und passende Subreddits, schaut sich jedes Bild an und vergibt 0–100 Punkte mit Begründung (Ablauf oben). Der Schlüssel bleibt nur im Browser und geht nur an api.anthropic.com. Kosten grob 0,05–0,15 € pro Suche.
+
+Dateien: `bildsuche/index.html`, `app.js` (Ablauf und Claude-Aufrufe), `local-ai.js` (kostenlose KI im Browser), `reddit.js` (Reddit-Daten auswerten), `vendor/anthropic-sdk.js` (Anthropic-SDK 1.3.0, für den Browser gebündelt). Transformers.js 4.3.1 wird bei Bedarf von cdn.jsdelivr.net geladen.
+
 ## Dateien
 
 * `index.html`, `styles.css`, `app.js`: die App

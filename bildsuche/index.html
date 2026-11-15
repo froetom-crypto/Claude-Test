@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1a1a19">
+  <title>Reddit-Bildsuche</title>
+  <link rel="icon" href="../icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <h1>Reddit-Bildsuche</h1>
+    <a class="back" href="../">← Pünktlich</a>
+  </header>
+
+  <main>
+    <form id="search" class="card" autocomplete="off">
+      <label class="field">
+        <span>Bildbeschreibung</span>
+        <textarea id="desc" rows="4" required
+          placeholder="z. B. Eine rote Katze schläft auf einer Fensterbank, draußen schneit es"></textarea>
+      </label>
+      <div class="row">
+        <label class="check"><input type="checkbox" id="nsfw"> NSFW-Beiträge zulassen</label>
+        <button type="submit" id="go">5 passende Bilder suchen</button>
+      </div>
+    </form>
+
+    <p id="status" class="status" aria-live="polite"></p>
+    <ol id="results" class="results"></ol>
+
+    <details class="card" id="settings">
+      <summary>Einstellungen &amp; Funktionsweise</summary>
+      <p class="hint"><b>Zwei Wege, je nachdem ob ein Schlüssel eingetragen ist:</b></p>
+      <p class="hint"><b>Kostenlos (ohne Schlüssel):</b> Eine Bild-KI (CLIP) läuft direkt auf deinem Gerät. Eine deutsche Beschreibung wird vorher automatisch ins Englische übersetzt. Beim ersten Mal werden ca. 200&ndash;300 MB Modelldaten geladen (am besten im WLAN), danach geht es schneller. Gut für das Hauptmotiv, bei feinen Details (Anzahl, wer macht was) ungenauer.</p>
+      <p class="hint"><b>Genauer (mit Anthropic-API-Schlüssel):</b> Claude macht aus der Beschreibung passende englische Suchbegriffe und Subreddits, schaut sich jedes Bild an und gibt 0&ndash;100 Punkte mit Begründung. Kosten grob 0,05&ndash;0,15 € pro Suche.</p>
+      <label class="field">
+        <span>Anthropic-API-Schlüssel (optional)</span>
+        <input id="key" type="password" placeholder="leer lassen für die kostenlose Variante" spellcheck="false">
+      </label>
+      <p class="hint">Der Schlüssel wird nur in diesem Browser gespeichert und direkt an api.anthropic.com geschickt. Ohne Schlüssel werden Bilder, die Reddit nicht direkt freigibt, über den freien Bild-Proxy wsrv.nl geladen.</p>
+    </details>
+  </main>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
