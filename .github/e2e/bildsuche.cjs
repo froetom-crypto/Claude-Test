@@ -9,7 +9,7 @@ const { chromium } = require('playwright-core');
   page.on('requestfailed', (r) => console.log('FAILED', r.failure()?.errorText, r.url().slice(0, 160)));
   page.on('response', (r) => {
     const u = r.url();
-    if (/reddit\.com|pullpush|wsrv\.nl|huggingface|jsdelivr|redd\.it|imgur/.test(u) && (r.status() >= 300 || /reddit\.com|pullpush/.test(u))) console.log('HTTP', r.status(), u.slice(0, 160));
+    if (/reddit\.com|pullpush|arctic-shift|wsrv\.nl|huggingface|jsdelivr|redd\.it|imgur/.test(u) && (r.status() >= 300 || /reddit\.com|pullpush|arctic-shift/.test(u))) console.log('HTTP', r.status(), u.slice(0, 160));
   });
   if (process.env.MOCK) {
     // Reddit/PullPush blocken Rechenzentren -> Reddit-Antwort nachbauen, aber mit echten Fotos (Wikimedia)
