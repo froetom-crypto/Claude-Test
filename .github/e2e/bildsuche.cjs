@@ -13,12 +13,12 @@ const { chromium } = require('playwright-core');
   });
   if (process.env.MOCK) {
     // Reddit/PullPush blocken Rechenzentren -> Reddit-Antwort nachbauen, aber mit echten Fotos (Wikimedia)
-    const W = 'https://upload.wikimedia.org/wikipedia/commons/thumb/';
+    const W = 'https://upload.wikimedia.org/wikipedia/commons/';
     const imgs = [
-      ['c1', 'My cat Cat03', W + '3/3a/Cat03.jpg/640px-Cat03.jpg'],
-      ['c2', 'Cat in November', W + '4/4d/Cat_November_2010-1a.jpg/640px-Cat_November_2010-1a.jpg'],
-      ['d1', 'Yellow labrador looking', W + '2/26/YellowLabradorLooking_new.jpg/640px-YellowLabradorLooking_new.jpg'],
-      ['c3', 'Kitten', W + 'b/bc/Juvenile_Ragdoll.jpg/640px-Juvenile_Ragdoll.jpg'],
+      ['c1', 'My cat Cat03', W + '3/3a/Cat03.jpg'],
+      ['c2', 'Cat in November', W + '4/4d/Cat_November_2010-1a.jpg'],
+      ['d1', 'Yellow labrador looking', W + '2/26/YellowLabradorLooking_new.jpg'],
+      ['c3', 'Kitten', W + 'b/bc/Juvenile_Ragdoll.jpg'],
     ];
     const listing = { data: { children: imgs.map(([id, title, url]) => ({ data: { id, title, subreddit: 'pics', author: 'x', ups: 1, permalink: `/r/pics/comments/${id}/`, post_hint: 'image', url, preview: { images: [{ source: { url, width: 640 }, resolutions: [] }] } } })) } };
     await page.route(/reddit\.com|pullpush\.io/, (r) => r.fulfill({ json: listing, headers: { 'access-control-allow-origin': '*' } }));
