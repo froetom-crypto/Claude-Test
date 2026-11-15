@@ -13,20 +13,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Quellen direkt prüfen
-        continue-on-error: true
-        run: |
-          curl -sS -o /dev/null -w "Reddit: %{http_code}\n" -A "Mozilla/5.0" "https://www.reddit.com/search.json?q=red+cat&limit=5"
-          curl -sS -m 30 "https://api.pullpush.io/reddit/search/submission/?q=red+cat+window&size=3" -D - | head -c 1500; echo
       - name: Vorbereiten
         run: |
           npm i --no-save --silent playwright-core@1.48.2
           python3 -m http.server 8080 >/dev/null 2>&1 &
           sleep 1
       - name: Bild-KI mit echten Fotos (Reddit nachgebaut)
-        run: MOCK=1 DESC="Ein gelber Hund schaut in die Kamera" EXPECT_FIRST="labrador" node .github/e2e/bildsuche.cjs
-      - name: Echte Reddit-Beiträge (über Arctic Shift, Reddit selbst sperrt)
-        run: node .github/e2e/bildsuche.cjs
+        run: SHOT=mock MOCK=1 DESC="Ein gelber Hund schaut in die Kamera" EXPECT_FIRST="labrador" node .github/e2e/bildsuche.cjs
+      - name: Echte Daten – Katze am Fenster
+        run: SHOT=katze node .github/e2e/bildsuche.cjs
+      - name: Echte Daten – Leuchtturm
+        run: SHOT=leuchtturm DESC="Ein Leuchtturm an der Küste bei Sonnenuntergang" node .github/e2e/bildsuche.cjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:

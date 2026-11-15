@@ -4,13 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#1a1a19">
-  <title>Reddit-Bildsuche</title>
+  <title>Bildsuche</title>
   <link rel="icon" href="../icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <header class="top">
-    <h1>Reddit-Bildsuche</h1>
+    <h1>Bildsuche</h1>
     <a class="back" href="../">← Pünktlich</a>
   </header>
 
@@ -33,7 +33,8 @@
     <details class="card" id="settings">
       <summary>Einstellungen &amp; Funktionsweise</summary>
       <p class="hint"><b>Zwei Wege, je nachdem ob ein Schlüssel eingetragen ist:</b></p>
-      <p class="hint"><b>Kostenlos (ohne Schlüssel):</b> Eine Bild-KI (CLIP) läuft direkt auf deinem Gerät. Eine deutsche Beschreibung wird vorher automatisch ins Englische übersetzt. Beim ersten Mal werden ca. 200&ndash;300 MB Modelldaten geladen (am besten im WLAN), danach geht es schneller. Gut für das Hauptmotiv, bei feinen Details (Anzahl, wer macht was) ungenauer.</p>
+      <p class="hint"><b>Bildquellen:</b> Reddit (über das freie Archiv Arctic Shift, weil Reddit direkte Abfragen sperrt), Wikimedia Commons (über 100 Mio. freie Fotos) und Openverse (Flickr, Museen und viele weitere freie Sammlungen).</p>
+      <p class="hint"><b>Kostenlos (ohne Schlüssel):</b> Die Bild-KI SigLIP läuft direkt auf deinem Gerät und bewertet jedes gefundene Bild. Eine deutsche Beschreibung wird vorher automatisch ins Englische übersetzt. Beim ersten Mal werden ca. 300 MB Modelldaten geladen (am besten im WLAN), danach geht es schneller.</p>
       <p class="hint"><b>Genauer (mit Anthropic-API-Schlüssel):</b> Claude macht aus der Beschreibung passende englische Suchbegriffe und Subreddits, schaut sich jedes Bild an und gibt 0&ndash;100 Punkte mit Begründung. Kosten grob 0,05&ndash;0,15 € pro Suche.</p>
       <label class="field">
         <span>Anthropic-API-Schlüssel (optional)</span>

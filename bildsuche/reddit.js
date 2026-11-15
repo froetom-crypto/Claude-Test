@@ -47,6 +47,8 @@ export function extractImages(listing, { nsfw = false } = {}) {
       author: p.author || '[gelöscht]',
       ups: p.ups ?? p.score ?? 0,
       permalink: `https://www.reddit.com${p.permalink}`,
+      source: `Reddit r/${p.subreddit || '?'}`,
+      credit: `von u/${p.author || '[gelöscht]'} · ${p.ups ?? p.score ?? 0} Upvotes`,
       full,
       preview,
     });
