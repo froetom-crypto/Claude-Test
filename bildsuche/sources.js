@@ -38,7 +38,8 @@ export async function searchWikimedia(query, limit = 40) {
 
 const PROVIDER = { flickr: 'Flickr', wikimedia: 'Wikimedia', smithsonian: 'Smithsonian', nappy: 'nappy', stocksnap: 'StockSnap', rawpixel: 'rawpixel' };
 
-export async function searchOpenverse(query, limit = 40) {
+// Ohne Konto erlaubt Openverse höchstens 20 Ergebnisse pro Abfrage (sonst 401).
+export async function searchOpenverse(query, limit = 20) {
   const p = new URLSearchParams({ q: query, page_size: String(limit) });
   const r = await fetch(`https://api.openverse.org/v1/images/?${p}`);
   if (!r.ok) throw new Error(`Openverse ${r.status}`);

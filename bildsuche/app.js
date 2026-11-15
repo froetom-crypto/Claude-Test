@@ -163,7 +163,13 @@ async function gatherAll(queries, subreddits, nsfw, english) {
   res.forEach((r, i) => r.status === 'rejected' && console.warn(names[i], r.reason?.message));
 
   const seen = new Set();
-  const uniq = (list) => list.filter((it) => { const k = it.full; if (seen.has(k)) return false; seen.add(k); return true; });
+  // doppelte Bilder (gleiche Adresse oder gleicher Titel, z. B. Crossposts) nur einmal
+  const uniq = (list) => list.filter((it) => {
+    const keys = [it.full, it.title.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()].filter((k) => k && k.length > 8);
+    if (keys.some((k) => seen.has(k))) return false;
+    keys.forEach((k) => seen.add(k));
+    return true;
+  });
   const groups = { reddit: uniq(val(0)), wikimedia: uniq([...val(1), ...val(2)]), openverse: uniq(val(3)) };
   return { groups, failed };
 }
