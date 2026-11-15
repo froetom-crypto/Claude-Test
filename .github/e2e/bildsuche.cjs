@@ -37,6 +37,7 @@ const { chromium } = require('playwright-core');
   }
   const results = await page.$$eval('.result', (els) => els.map((e) => `${e.querySelector('.score')?.textContent} | ${e.querySelector('h2').textContent} | ${e.querySelector('a').href}`));
   console.log('ERGEBNISSE:\n' + results.join('\n'));
+  console.log('BILDER GELADEN:', await page.$$eval('.result img', (els) => els.filter((i) => i.naturalWidth > 0).length), 'von', results.length);
   await page.waitForTimeout(3000);
   await page.screenshot({ path: 'bildsuche.png', fullPage: true });
   await b.close();
