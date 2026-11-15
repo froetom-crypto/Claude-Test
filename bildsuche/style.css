@@ -62,3 +62,11 @@ summary { cursor: pointer; font-weight: 600; }
 .result .why { margin: 6px 0; color: var(--ink-2); font-size: 14px; }
 .result .src { font-size: 13px; color: var(--ink-3); }
 .result a { color: var(--accent); }
+.similar {
+  margin-top: 10px; font-size: 14px; padding: 7px 12px;
+  background: transparent; color: var(--accent); border: 1px solid var(--accent);
+}
+.more {
+  display: block; width: 100%; margin: 14px 0 20px;
+  background: var(--card); color: var(--accent); border: 1px solid var(--border);
+}

@@ -42,6 +42,14 @@ const { chromium } = require('playwright-core');
   for (const img of await page.$$('.result img')) await img.scrollIntoViewIfNeeded().catch(() => {});
   await page.waitForTimeout(5000);
   console.log('BILDER GELADEN:', await page.$$eval('.result img', (els) => els.filter((i) => i.complete && i.naturalWidth > 0).length), 'von', results.length);
+  if (!process.env.MOCK && await page.$('.similar')) {
+    await page.click('.result:nth-child(2) .similar');
+    await page.waitForTimeout(1500);
+    console.log('MEHR WIE DIESES (Bild 2):', (await page.textContent('#status')).trim());
+    console.log((await page.$$eval('.result h2', (els) => els.map((e) => e.textContent))).join('\n'));
+    await page.click('#more');
+    console.log('NACH WEITERE 5:', await page.$$eval('.result', (els) => els.length), 'Treffer angezeigt');
+  }
   await page.screenshot({ path: `bildsuche-${process.env.SHOT || 'x'}.png`, fullPage: true });
   await b.close();
   if (!results.length) process.exit(1);

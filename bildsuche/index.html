@@ -29,12 +29,13 @@
 
     <p id="status" class="status" aria-live="polite"></p>
     <ol id="results" class="results"></ol>
+    <button type="button" id="more" class="more" hidden>Weitere 5 zeigen</button>
 
     <details class="card" id="settings">
       <summary>Einstellungen &amp; Funktionsweise</summary>
       <p class="hint"><b>Zwei Wege, je nachdem ob ein Schlüssel eingetragen ist:</b></p>
       <p class="hint"><b>Bildquellen:</b> Reddit (über das freie Archiv Arctic Shift, weil Reddit direkte Abfragen sperrt), Wikimedia Commons (über 100 Mio. freie Fotos) und Openverse (Flickr, Museen und viele weitere freie Sammlungen).</p>
-      <p class="hint"><b>Kostenlos (ohne Schlüssel):</b> Die Bild-KI SigLIP läuft direkt auf deinem Gerät und bewertet jedes gefundene Bild. Eine deutsche Beschreibung wird vorher automatisch ins Englische übersetzt. Beim ersten Mal werden ca. 300 MB Modelldaten geladen (am besten im WLAN), danach geht es schneller.</p>
+      <p class="hint"><b>Kostenlos (ohne Schlüssel):</b> Die Bild-KI SigLIP läuft direkt auf deinem Gerät. Sie zerlegt die Beschreibung in Einzelheiten (z. B. „rote Katze“, „Fensterbank“, „Schnee“) und prüft jedes Bild auf jede davon. Mit „Mehr wie dieses“ unter einem Treffer sortierst du nach Bildern, die diesem ähneln. Eine deutsche Beschreibung wird vorher automatisch ins Englische übersetzt. Beim ersten Mal werden ca. 300 MB Modelldaten geladen (am besten im WLAN), danach geht es schneller.</p>
       <p class="hint"><b>Genauer (mit Anthropic-API-Schlüssel):</b> Claude macht aus der Beschreibung passende englische Suchbegriffe und Subreddits, schaut sich jedes Bild an und gibt 0&ndash;100 Punkte mit Begründung. Kosten grob 0,05&ndash;0,15 € pro Suche.</p>
       <label class="field">
         <span>Anthropic-API-Schlüssel (optional)</span>

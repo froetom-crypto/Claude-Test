@@ -87,3 +87,12 @@ export function contentWords(text) {
   const strong = all.filter((w) => !WEAK.has(w));
   return strong.length ? strong : all;
 }
+
+// Beschreibung in Einzelheiten zerlegen, z. B. "a red cat sleeps on a window sill, outside it snows"
+// -> ["a red cat sleeps", "a window sill", "it snows"]. Jede Einzelheit wird separat geprüft.
+const SPLIT = /,|;|\.|\b(?:in front of|next to|on top of|and|with|while|on|in|at|under|behind|near|beside|outside|inside|through|against|by)\b/;
+export function detailParts(english) {
+  const parts = String(english).toLowerCase().split(SPLIT).map((p) => p.replace(/\s+/g, ' ').trim()).filter((p) => words(p).length);
+  const uniq = [...new Set(parts)];
+  return uniq.length > 1 ? uniq.slice(0, 5) : [];
+}
