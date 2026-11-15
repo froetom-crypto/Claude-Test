@@ -86,14 +86,16 @@ function normalize(data) {
 
 // Reddit-Bilder liefern nicht immer CORS-Header. Dann über den freien Bild-Proxy wsrv.nl laden
 // (der verkleinert auch gleich, das spart Datenvolumen).
-let useProxy = false;
 const viaProxy = (url) => `https://wsrv.nl/?url=${encodeURIComponent(url)}&w=336&h=336&fit=inside&output=jpg`;
 
-async function loadImage(T, url) {
-  if (!useProxy) {
-    try { return await T.RawImage.fromURL(url); } catch { useProxy = true; }
+// Erst die Vorschau direkt, dann das Original direkt, zuletzt über den Proxy.
+async function loadImage(T, it) {
+  const tries = [it.preview, it.full !== it.preview ? it.full : null, viaProxy(it.full || it.preview)].filter(Boolean);
+  let err;
+  for (const url of tries) {
+    try { return await T.RawImage.fromURL(url); } catch (e) { err = e; }
   }
-  return T.RawImage.fromURL(viaProxy(url));
+  throw err;
 }
 
 // Gibt für jedes Bild eine Ähnlichkeit zurück (Kosinus, typischerweise 0,15 bis 0,35) oder null, wenn es nicht ladbar war.
@@ -110,7 +112,7 @@ export async function rankWithClip(englishText, items, onStatus) {
   const BATCH = 8;
   for (let i = 0; i < items.length; i += BATCH) {
     const group = items.slice(i, i + BATCH);
-    const loaded = await Promise.all(group.map((it) => loadImage(T, it.preview).catch(() => null)));
+    const loaded = await Promise.all(group.map((it) => loadImage(T, it).catch(() => null)));
     const ok = loaded.map((img, k) => ({ img, idx: i + k })).filter((x) => x.img);
     if (ok.length) {
       const inputs = await m.processor(ok.map((x) => x.img));

@@ -9,7 +9,7 @@ const { chromium } = require('playwright-core');
   page.on('requestfailed', (r) => console.log('FAILED', r.failure()?.errorText, r.url().slice(0, 160)));
   page.on('response', (r) => {
     const u = r.url();
-    if (/reddit\.com|pullpush|wsrv\.nl|huggingface|jsdelivr|redd\.it|imgur/.test(u) && (r.status() >= 300 || /reddit\.com|pullpush/.test(u))) console.log('HTTP', r.status(), u.slice(0, 160));
+    if (/reddit\.com|pullpush|arctic-shift|wsrv\.nl|huggingface|jsdelivr|redd\.it|imgur/.test(u) && (r.status() >= 300 || /reddit\.com|pullpush|arctic-shift/.test(u))) console.log('HTTP', r.status(), u.slice(0, 160));
   });
   if (process.env.MOCK) {
     // Reddit/PullPush blocken Rechenzentren -> Reddit-Antwort nachbauen, aber mit echten Fotos (Wikimedia)
@@ -37,6 +37,7 @@ const { chromium } = require('playwright-core');
   }
   const results = await page.$$eval('.result', (els) => els.map((e) => `${e.querySelector('.score')?.textContent} | ${e.querySelector('h2').textContent} | ${e.querySelector('a').href}`));
   console.log('ERGEBNISSE:\n' + results.join('\n'));
+  console.log('BILDER GELADEN:', await page.$$eval('.result img', (els) => els.filter((i) => i.naturalWidth > 0).length), 'von', results.length);
   await page.waitForTimeout(3000);
   await page.screenshot({ path: 'bildsuche.png', fullPage: true });
   await b.close();

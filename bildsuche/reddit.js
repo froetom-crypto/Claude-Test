@@ -59,7 +59,8 @@ export function prefilter(cands, keywords, n) {
   const rank = (c) => {
     const t = words(c.title);
     const overlap = keywords.filter((k) => t.some((w) => w.startsWith(k) || k.startsWith(w))).length;
-    return overlap * 3 + (c.hits || 1) * 2 + Math.log10(1 + Math.max(0, c.ups));
+    const subHit = keywords.some((k) => (c.subreddit || '').toLowerCase().startsWith(k)) ? 2 : 0;
+  return overlap * 3 + subHit + (c.hits || 1) * 2 + Math.log10(1 + Math.max(0, c.ups));
   };
   return [...cands].map((c) => ({ c, r: rank(c) })).sort((a, b) => b.r - a.r).slice(0, n).map((x) => x.c);
 }
@@ -71,4 +72,16 @@ export function buildQueries(english) {
   const q = [kw.slice(0, 4).join(' '), kw.slice(0, 2).join(' ')];
   if (kw.length > 1) q.push(kw.slice(0, 6).join(' OR '));
   return [...new Set(q)];
+}
+
+// Stichwörter ohne Farben, Verben und Füllwörter: gut für Subreddit-Namen und Titelsuche.
+const WEAK = new Set(('red blue green yellow black white orange pink purple brown grey gray golden dark light bright ' +
+  'big small little large tiny old young new beautiful cute happy sad funny ' +
+  'sleeps sleeping sleep looks looking look sits sitting stands standing lies lying runs running walks walking ' +
+  'plays playing holds holding eats eating outside inside into onto front behind while through under over next ' +
+  'there here some very photo picture image camera').split(' '));
+export function contentWords(text) {
+  const all = words(text);
+  const strong = all.filter((w) => !WEAK.has(w));
+  return strong.length ? strong : all;
 }

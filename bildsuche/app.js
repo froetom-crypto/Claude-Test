@@ -1,6 +1,6 @@
 // Reddit-Bildsuche: Beschreibung eingeben -> Kandidaten von Reddit holen -> Claude bewertet die Bilder -> Top 5
 import { Anthropic, jsonSchemaOutputFormat } from './vendor/anthropic-sdk.js';
-import { extractImages, prefilter, words, buildQueries } from './reddit.js';
+import { extractImages, prefilter, words, buildQueries, contentWords } from './reddit.js';
 
 const MODEL = 'claude-opus-5-5';
 const MAX_CANDIDATES = 40;
@@ -33,38 +33,74 @@ async function redditSearch(query, { sub, nsfw }) {
   return r.json();
 }
 
-// Ersatz, wenn Reddit Abfragen aus dem Browser blockiert: PullPush, ein freies Reddit-Archiv mit CORS-Freigabe.
-async function pullpushSearch(query, { sub, nsfw }) {
-  const p = new URLSearchParams({ q: query.replace(/ OR /g, ' | '), size: '100' });
-  if (sub) p.set('subreddit', sub);
-  if (!nsfw) p.set('over_18', 'false');
-  const r = await fetch(`https://api.pullpush.io/reddit/search/submission/?${p}`);
-  if (!r.ok) throw new Error(`PullPush ${r.status}`);
-  const j = await r.json();
-  return { data: { children: (j.data || []).map((d) => ({ data: d })) } };
+// Reddit blockiert Abfragen von fremden Webseiten meistens. Dann: Arctic Shift, ein freies Reddit-Archiv
+// mit CORS-Freigabe. Es liefert dieselben Beitragsdaten, verlangt aber immer ein Subreddit.
+const ARCTIC = 'https://arctic-shift.photon-reddit.com/api';
+const GENERAL_SUBS = ['pics', 'itookapicture'];
+
+async function arctic(path, params) {
+  const r = await fetch(`${ARCTIC}/${path}?${new URLSearchParams(params)}`);
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || j.error) throw new Error(`Arctic Shift ${r.status}${j.error ? ': ' + j.error : ''}`);
+  return j.data || [];
+}
+
+// Passendes Subreddit zu einem Stichwort, z. B. cat -> cats, dog -> dogpictures
+async function subredditsFor(word, nsfw) {
+  const re = new RegExp(`^${word}(s|es)?(pics|pictures|photos|photography|porn|images)?$`, 'i');
+  const list = await arctic('subreddits/search', { subreddit_prefix: word, limit: '25' });
+  return list
+    .filter((s) => re.test(s.display_name || '') && s.allow_images !== false && (nsfw || !s.over18))
+    .sort((x, y) => (y._meta?.num_posts || 0) - (x._meta?.num_posts || 0))
+    .slice(0, 2)
+    .map((s) => s.display_name);
+}
+
+const asListing = (posts) => ({ data: { children: posts.map((d) => ({ data: d })) } });
+
+async function arcticCollect(englishText, extraSubs, nsfw) {
+  const kw = contentWords(englishText);
+  if (!kw.length) throw new Error('Bitte die Beschreibung etwas genauer formulieren.');
+  const found = await Promise.allSettled(kw.slice(0, 3).map((k) => subredditsFor(k, nsfw).then((subs) => subs.map((sub) => ({ sub, k })))));
+  const topical = found.flatMap((f) => (f.status === 'fulfilled' ? f.value : []));
+  for (const sub of extraSubs.slice(0, 3)) if (!topical.some((t) => t.sub.toLowerCase() === sub.toLowerCase())) topical.push({ sub, k: null });
+
+  const jobs = [];
+  for (const { sub, k } of topical.slice(0, 5)) {
+    const other = kw.find((w) => w !== k);
+    if (other) jobs.push({ subreddit: sub, title: other });
+    jobs.push(k ? { subreddit: sub } : { subreddit: sub, title: kw[0] });
+  }
+  for (const sub of GENERAL_SUBS) for (const w of kw.slice(0, 2)) jobs.push({ subreddit: sub, title: w });
+
+  const settled = await Promise.allSettled(jobs.map((j) => arctic('posts/search', { ...j, limit: '100' }).then(asListing)));
+  return { settled, subs: [...new Set(topical.map((t) => t.sub))] };
 }
 
 let redditBlocked = false;
-async function searchPosts(query, opts) {
-  if (!redditBlocked) {
-    try { return await redditSearch(query, opts); } catch (e) { redditBlocked = true; console.warn('Reddit direkt nicht erreichbar, nehme PullPush:', e.message); }
-  }
-  return pullpushSearch(query, opts);
-}
 
-async function collectCandidates(queries, subreddits, nsfw) {
-  const jobs = [
-    ...queries.slice(0, 3).map((q) => ({ q })),
-    ...subreddits.slice(0, 3).map((sub) => ({ q: queries[0], sub })),
-  ];
-  // erst eine Anfrage, damit klar ist, ob Reddit direkt geht; dann der Rest parallel
-  const first = await Promise.allSettled([searchPosts(jobs[0].q, { sub: jobs[0].sub, nsfw })]);
-  const rest = await Promise.allSettled(jobs.slice(1).map((j) => searchPosts(j.q, { sub: j.sub, nsfw })));
-  const settled = [...first, ...rest];
+async function collectCandidates(queries, subreddits, nsfw, englishText = queries.join(' ')) {
+  let settled = [];
+  if (!redditBlocked) {
+    const jobs = [...queries.slice(0, 3).map((q) => ({ q })), ...subreddits.slice(0, 3).map((sub) => ({ q: queries[0], sub }))];
+    const first = await Promise.allSettled([redditSearch(jobs[0].q, { sub: jobs[0].sub, nsfw })]);
+    if (first[0].status === 'fulfilled') {
+      settled = [...first, ...await Promise.allSettled(jobs.slice(1).map((j) => redditSearch(j.q, { sub: j.sub, nsfw })))];
+    } else {
+      redditBlocked = true;
+      console.warn('Reddit direkt gesperrt, nehme Arctic Shift:', first[0].reason?.message);
+    }
+  }
+  if (redditBlocked) {
+    status(`Reddit sperrt direkte Abfragen – suche über das Reddit-Archiv Arctic Shift …`);
+    const r = await arcticCollect(englishText, subreddits, nsfw);
+    settled = r.settled;
+    if (r.subs.length) status(`Suche in r/${r.subs.join(', r/')}, r/${GENERAL_SUBS.join(', r/')} …`);
+  }
   const ok = settled.filter((s) => s.status === 'fulfilled');
   if (!ok.length) {
     const why = settled.map((s) => s.reason?.message).filter(Boolean)[0] || 'unbekannt';
-    throw new Error(`Reddit war nicht erreichbar (${why}). Bitte kurz warten und nochmal versuchen.`);
+    throw new Error(`Reddit-Beiträge konnten nicht geladen werden (${why}). Bitte kurz warten und nochmal versuchen.`);
   }
   const byId = new Map();
   for (const s of ok) {
@@ -238,7 +274,7 @@ async function searchLocal(desc, nsfw) {
   const queries = buildQueries(english);
 
   status(`2/3 Suche auf Reddit: ${queries.map((q) => `„${q}“`).join(', ')} …`);
-  const cands = await collectCandidates(queries, [], nsfw);
+  const cands = await collectCandidates(queries, [], nsfw, english);
   if (!cands.length) { status(`Reddit hat keine Bildbeiträge zu „${english}“ geliefert. Beschreibung anders formulieren?`); return; }
 
   const pool = prefilter(cands, words(english), LOCAL_CANDIDATES);

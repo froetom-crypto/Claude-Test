@@ -1,4 +1,4 @@
-name: Bildsuche testen (echter Browser, echtes Reddit, ohne API-Schlüssel)
+name: Bildsuche testen (echter Browser, ohne API-Schlüssel)
 on:
   workflow_dispatch:
   push:
@@ -25,8 +25,7 @@ jobs:
           sleep 1
       - name: Bild-KI mit echten Fotos (Reddit nachgebaut)
         run: MOCK=1 DESC="Ein gelber Hund schaut in die Kamera" EXPECT_FIRST="labrador" node .github/e2e/bildsuche.cjs
-      - name: Echtes Reddit (von Rechenzentren aus oft gesperrt)
-        continue-on-error: true
+      - name: Echte Reddit-Beiträge (über Arctic Shift, Reddit selbst sperrt)
         run: node .github/e2e/bildsuche.cjs
       - uses: actions/upload-artifact@v4
         if: always()
