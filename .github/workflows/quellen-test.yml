@@ -1,0 +1,25 @@
+name: Reddit-Quellen prüfen (vorübergehend)
+on:
+  push:
+    branches: [ccr-2fb6385d-mau7ew]
+    paths: ['.github/workflows/quellen-test.yml']
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Quellen abfragen (Status, CORS-Header, Anfang der Antwort)
+        run: |
+          for u in \
+            "https://www.reddit.com/search.json?q=red+cat&limit=3" \
+            "https://old.reddit.com/search.json?q=red+cat&limit=3" \
+            "https://api.reddit.com/search?q=red+cat&limit=3" \
+            "https://arctic-shift.photon-reddit.com/api/posts/search?subreddit=cats&title=window&limit=3" \
+            "https://arctic-shift.photon-reddit.com/api/posts/search?query=red%20cat%20window&limit=3" \
+            "https://arctic-shift.photon-reddit.com/api/posts/search?title=red%20cat&limit=3" \
+            "https://arctic-shift.photon-reddit.com/api/subreddits/search?subreddit_prefix=cat&limit=3" \
+            ; do
+            echo "=================== $u"
+            curl -sS -m 30 -H "Origin: https://froetom-crypto.github.io" -A "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/130 Mobile Safari/537.36" -D /tmp/h -o /tmp/b "$u" || true
+            grep -iE "^HTTP|access-control-allow-origin|content-type" /tmp/h || true
+            head -c 900 /tmp/b; echo
+          done
