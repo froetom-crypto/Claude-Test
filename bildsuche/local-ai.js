@@ -1,10 +1,10 @@
 // Kostenlose Variante ohne API-Schlüssel: Die KI läuft direkt im Browser.
 //  - Xenova/opus-mt-de-en übersetzt eine deutsche Beschreibung ins Englische
-//  - Xenova/clip-vit-base-patch32 (CLIP) vergleicht Text und Bilder
-// Die Modelle (zusammen ca. 200–300 MB) werden beim ersten Mal von Hugging Face geladen und danach
+//  - Xenova/siglip-base-patch16-224 (SigLIP, Nachfolger von CLIP) bewertet, wie gut Text und Bild zusammenpassen
+// Die Modelle (zusammen ca. 300 MB) werden beim ersten Mal von Hugging Face geladen und danach
 // im Browser-Cache gehalten. Die Bibliothek wird erst geladen, wenn diese Variante gebraucht wird.
 
-const CLIP_ID = 'Xenova/clip-vit-base-patch32';
+const MODEL_ID = 'Xenova/siglip-base-patch16-224';
 const TRANSLATE_ID = 'Xenova/opus-mt-de-en';
 
 let lib = null;
@@ -44,14 +44,12 @@ async function loadClip(onStatus) {
 async function loadClipInner(onStatus) {
   const T = await loadLib();
   const progress_callback = progressTracker('Lade Bild-KI', onStatus);
-  const opts = { dtype: 'q8', device: 'wasm', progress_callback };
-  const [tokenizer, processor, textModel, visionModel] = await Promise.all([
-    T.AutoTokenizer.from_pretrained(CLIP_ID, { progress_callback }),
-    T.AutoProcessor.from_pretrained(CLIP_ID, { progress_callback }),
-    T.CLIPTextModelWithProjection.from_pretrained(CLIP_ID, opts),
-    T.CLIPVisionModelWithProjection.from_pretrained(CLIP_ID, opts),
+  const [tokenizer, processor, model] = await Promise.all([
+    T.AutoTokenizer.from_pretrained(MODEL_ID, { progress_callback }),
+    T.AutoProcessor.from_pretrained(MODEL_ID, { progress_callback }),
+    T.AutoModel.from_pretrained(MODEL_ID, { dtype: 'q8', device: 'wasm', progress_callback }),
   ]);
-  clip = { tokenizer, processor, textModel, visionModel };
+  clip = { tokenizer, processor, model };
   return clip;
 }
 
@@ -77,14 +75,7 @@ export async function toEnglish(text, onStatus) {
   return out?.[0]?.translation_text?.trim() || text;
 }
 
-function normalize(data) {
-  let n = 0;
-  for (const v of data) n += v * v;
-  n = Math.sqrt(n) || 1;
-  return Array.from(data, (v) => v / n);
-}
-
-// Reddit-Bilder liefern nicht immer CORS-Header. Dann über den freien Bild-Proxy wsrv.nl laden
+// Nicht alle Bildserver liefern CORS-Header. Dann über den freien Bild-Proxy wsrv.nl laden
 // (der verkleinert auch gleich, das spart Datenvolumen).
 const viaProxy = (url) => `https://wsrv.nl/?url=${encodeURIComponent(url)}&w=336&h=336&fit=inside&output=jpg`;
 
@@ -98,16 +89,14 @@ async function loadImage(T, it) {
   throw err;
 }
 
-// Gibt für jedes Bild eine Ähnlichkeit zurück (Kosinus, typischerweise 0,15 bis 0,35) oder null, wenn es nicht ladbar war.
+// Gibt für jedes Bild einen SigLIP-Wert zurück (Logit: je höher, desto besser passt es; grob -20 bis +5)
+// oder null, wenn das Bild nicht ladbar war.
 export async function rankWithClip(englishText, items, onStatus) {
   const T = await loadLib();
   const m = await loadClip(onStatus);
+  const text = m.tokenizer([englishText.toLowerCase()], { padding: 'max_length', truncation: true });
 
-  const tok = m.tokenizer([englishText], { padding: true, truncation: true });
-  const { text_embeds } = await m.textModel(tok);
-  const textVec = normalize(text_embeds.data);
-
-  const sims = new Array(items.length).fill(null);
+  const scores = new Array(items.length).fill(null);
   let done = 0;
   const BATCH = 8;
   for (let i = 0; i < items.length; i += BATCH) {
@@ -115,21 +104,16 @@ export async function rankWithClip(englishText, items, onStatus) {
     const loaded = await Promise.all(group.map((it) => loadImage(T, it).catch(() => null)));
     const ok = loaded.map((img, k) => ({ img, idx: i + k })).filter((x) => x.img);
     if (ok.length) {
-      const inputs = await m.processor(ok.map((x) => x.img));
-      const { image_embeds } = await m.visionModel(inputs);
-      const dim = image_embeds.dims[1];
-      ok.forEach((x, k) => {
-        const v = normalize(image_embeds.data.subarray(k * dim, (k + 1) * dim));
-        let s = 0;
-        for (let d = 0; d < dim; d++) s += v[d] * textVec[d];
-        sims[x.idx] = s;
-      });
+      const images = await m.processor(ok.map((x) => x.img));
+      const { logits_per_image } = await m.model({ ...text, ...images });
+      ok.forEach((x, k) => { scores[x.idx] = logits_per_image.data[k]; });
     }
     done += group.length;
     onStatus(`Bild-KI prüft ${items.length} Bilder … ${done}/${items.length}`);
   }
-  return sims;
+  console.debug('SigLIP-Werte', items.map((it, i) => `${scores[i]?.toFixed(2)} ${it.title.slice(0, 40)}`).join(' | '));
+  return scores;
 }
 
-// CLIP-Ähnlichkeit grob in Prozent umrechnen (0,15 -> 0 %, 0,35 -> 100 %).
-export const simToPercent = (s) => Math.round(Math.max(0, Math.min(1, (s - 0.15) / 0.2)) * 100);
+// SigLIP-Wert in Prozent umrechnen (-12 -> 0 %, -2 -> 100 %).
+export const simToPercent = (s) => Math.round(Math.max(0, Math.min(1, (s + 12) / 10)) * 100);

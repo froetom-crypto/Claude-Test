@@ -9,7 +9,7 @@ const { chromium } = require('playwright-core');
   page.on('requestfailed', (r) => console.log('FAILED', r.failure()?.errorText, r.url().slice(0, 160)));
   page.on('response', (r) => {
     const u = r.url();
-    if (/reddit\.com|pullpush|arctic-shift|wsrv\.nl|huggingface|jsdelivr|redd\.it|imgur/.test(u) && (r.status() >= 300 || /reddit\.com|pullpush|arctic-shift/.test(u))) console.log('HTTP', r.status(), u.slice(0, 160));
+    if (/reddit\.com|pullpush|arctic-shift|openverse|wikimedia\.org\/w\/api|wsrv\.nl|huggingface|jsdelivr|redd\.it|imgur/.test(u) && (r.status() >= 300 || /reddit\.com|pullpush|arctic-shift|openverse\.org\/v1\/images\/\?|w\/api\.php/.test(u))) console.log('HTTP', r.status(), u.slice(0, 160));
   });
   if (process.env.MOCK) {
     // Reddit/PullPush blocken Rechenzentren -> Reddit-Antwort nachbauen, aber mit echten Fotos (Wikimedia)
@@ -22,6 +22,8 @@ const { chromium } = require('playwright-core');
     ];
     const listing = { data: { children: imgs.map(([id, title, url]) => ({ data: { id, title, subreddit: 'pics', author: 'x', ups: 1, permalink: `/r/pics/comments/${id}/`, post_hint: 'image', url, preview: { images: [{ source: { url, width: 640 }, resolutions: [] }] } } })) } };
     await page.route(/reddit\.com|pullpush\.io/, (r) => r.fulfill({ json: listing, headers: { 'access-control-allow-origin': '*' } }));
+    await page.route(/commons\.wikimedia\.org\/w\/api\.php/, (r) => r.fulfill({ json: { query: { pages: {} } }, headers: { 'access-control-allow-origin': '*' } }));
+    await page.route(/api\.openverse\.org\/v1\/images\/\?/, (r) => r.fulfill({ json: { results: [] }, headers: { 'access-control-allow-origin': '*' } }));
   }
   await page.goto(process.env.URL || 'http://localhost:8080/bildsuche/');
   const desc = process.env.DESC || 'Eine rote Katze schläft auf einer Fensterbank, draußen schneit es';
@@ -35,11 +37,11 @@ const { chromium } = require('playwright-core');
     if (s !== last) { console.log(`STATUS [${Math.round((Date.now() - t0) / 1000)}s]:`, s); last = s; }
     if (await page.$eval('#go', (el) => !el.disabled)) break;
   }
-  const results = await page.$$eval('.result', (els) => els.map((e) => `${e.querySelector('.score')?.textContent} | ${e.querySelector('h2').textContent} | ${e.querySelector('a').href}`));
+  const results = await page.$$eval('.result', (els) => els.map((e) => `${e.querySelector('.score')?.textContent} | ${e.querySelector('h2').textContent} | ${e.querySelector('.src')?.textContent} | ${e.querySelector('a').href}`));
   console.log('ERGEBNISSE:\n' + results.join('\n'));
   console.log('BILDER GELADEN:', await page.$$eval('.result img', (els) => els.filter((i) => i.naturalWidth > 0).length), 'von', results.length);
   await page.waitForTimeout(3000);
-  await page.screenshot({ path: 'bildsuche.png', fullPage: true });
+  await page.screenshot({ path: `bildsuche-${process.env.SHOT || 'x'}.png`, fullPage: true });
   await b.close();
   if (!results.length) process.exit(1);
   if (process.env.EXPECT_FIRST && !results[0].includes(process.env.EXPECT_FIRST)) { console.log('FALSCHE REIHENFOLGE'); process.exit(1); }

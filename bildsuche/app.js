@@ -1,9 +1,10 @@
 // Reddit-Bildsuche: Beschreibung eingeben -> Kandidaten von Reddit holen -> Claude bewertet die Bilder -> Top 5
 import { Anthropic, jsonSchemaOutputFormat } from './vendor/anthropic-sdk.js';
 import { extractImages, prefilter, words, buildQueries, contentWords } from './reddit.js';
+import { searchWikimedia, searchOpenverse } from './sources.js';
 
 const MODEL = 'claude-opus-5-5';
-const MAX_CANDIDATES = 40;
+const MAX_CANDIDATES = 45;
 const BATCH = 10;
 const TOP = 5;
 const KEY_STORE = 'bildsuche.apiKey';
@@ -144,6 +145,42 @@ async function collectCandidates(queries, subreddits, nsfw, englishText = querie
   return [...byId.values()];
 }
 
+// ---------- Alle Quellen zusammen ----------
+// Reddit (direkt oder über Arctic Shift), Wikimedia Commons und Openverse parallel abfragen.
+async function gatherAll(queries, subreddits, nsfw, english) {
+  const kw = contentWords(english);
+  const q3 = kw.slice(0, 3).join(' ') || english;
+  const q2 = kw.slice(0, 2).join(' ') || english;
+  const names = ['Reddit', 'Wikimedia Commons', 'Wikimedia Commons', 'Openverse'];
+  const res = await Promise.allSettled([
+    collectCandidates(queries, subreddits, nsfw, english),
+    searchWikimedia(q3),
+    q2 !== q3 ? searchWikimedia(q2) : Promise.resolve([]),
+    searchOpenverse(q3),
+  ]);
+  const val = (i) => (res[i].status === 'fulfilled' ? res[i].value : []);
+  const failed = [...new Set(res.map((r, i) => (r.status === 'rejected' ? names[i] : null)).filter(Boolean))];
+  res.forEach((r, i) => r.status === 'rejected' && console.warn(names[i], r.reason?.message));
+
+  const seen = new Set();
+  const uniq = (list) => list.filter((it) => { const k = it.full; if (seen.has(k)) return false; seen.add(k); return true; });
+  const groups = { reddit: uniq(val(0)), wikimedia: uniq([...val(1), ...val(2)]), openverse: uniq(val(3)) };
+  return { groups, failed };
+}
+
+// Ausgewogene Auswahl: aus jeder Quelle die besten nach Titel, Rest auffüllen.
+function balancedPool(groups, keywords, n) {
+  const lists = Object.values(groups).filter((l) => l.length);
+  if (!lists.length) return [];
+  const per = Math.ceil(n / lists.length);
+  const picked = lists.flatMap((l) => prefilter(l, keywords, per));
+  const ids = new Set(picked.map((x) => x.id));
+  const rest = prefilter(lists.flat().filter((x) => !ids.has(x.id)), keywords, Math.max(0, n - picked.length));
+  return [...picked, ...rest].slice(0, n);
+}
+
+const sourceSummary = (groups) => `Reddit ${groups.reddit.length}, Wikimedia ${groups.wikimedia.length}, Openverse ${groups.openverse.length}`;
+
 // ---------- Claude ----------
 const PLAN_SCHEMA = {
   type: 'object',
@@ -207,7 +244,7 @@ function planQueries(c, desc) {
 async function rateBatch(c, desc, items) {
   const content = [{ type: 'text', text: `Gesuchtes Bild: "${desc}"\n\nBewerte jedes der folgenden ${items.length} Bilder.` }];
   for (const it of items) {
-    content.push({ type: 'text', text: `Bild ${it.nr} (Titel: "${it.title}", r/${it.subreddit})` });
+    content.push({ type: 'text', text: `Bild ${it.nr} (Titel: "${it.title}", Quelle: ${it.source})` });
     content.push({ type: 'image', source: { type: 'url', url: it.preview } });
   }
   const out = await ask(c, {
@@ -285,8 +322,9 @@ function render(list) {
     src.className = 'src';
     const link = document.createElement('a');
     link.href = it.permalink; link.target = '_blank'; link.rel = 'noopener';
-    link.textContent = `r/${it.subreddit} öffnen`;
-    src.append(`von u/${it.author} · ${it.ups} Upvotes · `, link);
+    link.textContent = `${it.source} öffnen`;
+    if (it.credit) src.append(`${it.credit} · `);
+    src.append(link);
     meta.append(src);
 
     li.append(a, meta);
@@ -305,12 +343,11 @@ async function searchLocal(desc, nsfw) {
   const english = await ai.toEnglish(desc, status);
   const queries = buildQueries(english);
 
-  status(`2/3 Suche auf Reddit: ${queries.map((q) => `„${q}“`).join(', ')} …`);
-  const cands = await collectCandidates(queries, [], nsfw, english);
-  if (!cands.length) { status(`Reddit hat keine Bildbeiträge zu „${english}“ geliefert. Beschreibung anders formulieren?`); return; }
-
-  const pool = prefilter(cands, words(english), LOCAL_CANDIDATES);
-  status(`3/3 Bild-KI prüft ${pool.length} Bilder …`);
+  status(`2/3 Suche auf Reddit, Wikimedia Commons und Openverse nach „${english}“ …`);
+  const { groups, failed } = await gatherAll(queries, [], nsfw, english);
+  const pool = balancedPool(groups, words(english), LOCAL_CANDIDATES);
+  if (!pool.length) throw new Error(`Keine Bilder zu „${english}“ gefunden${failed.length ? ` (nicht erreichbar: ${failed.join(', ')})` : ''}. Beschreibung anders formulieren?`);
+  status(`3/3 Bild-KI prüft ${pool.length} Bilder (${sourceSummary(groups)}) …`);
   const sims = await ai.rankWithClip(english, pool, status);
 
   const top = pool
@@ -321,7 +358,7 @@ async function searchLocal(desc, nsfw) {
     .map(({ it, s }) => ({ ...it, score: ai.simToPercent(s) }));
   render(top);
   status(top.length
-    ? `Die ${top.length} ähnlichsten von ${pool.length} Bildern (kostenlose Bild-KI im Browser, gesucht nach „${english}“). Mit API-Schlüssel wird die Bewertung genauer.`
+    ? `Die ${top.length} passendsten von ${pool.length} Bildern aus Reddit, Wikimedia Commons und Openverse (Bild-KI im Browser, gesucht nach „${english}“).${failed.length ? ` Nicht erreichbar: ${failed.join(', ')}.` : ''}`
     : 'Die Bilder konnten nicht geladen werden.', !top.length);
 }
 
@@ -343,12 +380,11 @@ async function search(desc, nsfw) {
   const queries = plan.queries.filter(Boolean);
   if (!queries.length) queries.push(desc);
 
-  status(`2/3 Suche auf Reddit: ${queries.map((q) => `„${q}“`).join(', ')}${plan.subreddits.length ? ' · r/' + plan.subreddits.slice(0, 3).join(', r/') : ''} …`);
-  const cands = await collectCandidates(queries, plan.subreddits, nsfw);
-  if (!cands.length) { status('Reddit hat keine passenden Bildbeiträge geliefert. Beschreibung anders formulieren?'); return; }
-
+  status(`2/3 Suche auf Reddit, Wikimedia Commons und Openverse: ${queries.map((q) => `„${q}“`).join(', ')} …`);
+  const { groups, failed } = await gatherAll(queries, plan.subreddits, nsfw, queries[0]);
   const kw = words(queries.join(' '));
-  const pool = prefilter(cands, kw, MAX_CANDIDATES).map((it, i) => ({ ...it, nr: i + 1 }));
+  const pool = balancedPool(groups, kw, MAX_CANDIDATES).map((it, i) => ({ ...it, nr: i + 1 }));
+  if (!pool.length) throw new Error(`Keine Bilder gefunden${failed.length ? ` (nicht erreichbar: ${failed.join(', ')})` : ''}. Beschreibung anders formulieren?`);
   status(`3/3 Claude prüft ${pool.length} Bilder … 0/${pool.length}`);
   const ratings = await rateAll(c, desc, pool, (n) => status(`3/3 Claude prüft ${pool.length} Bilder … ${n}/${pool.length}`));
 
