@@ -199,9 +199,9 @@ dialog::backdrop{background:#0008}
 
 <script>
 const PROVIDERS = {
-  pollinations: { endpoint: 'https://text.pollinations.ai/openai', model: 'mistral', listUrl: 'https://text.pollinations.ai/models',
-    models: ['mistral','deepseek','llama','qwen-coder','openai'],
-    note: 'Kostenlos und ohne Anmeldung. Wie freizügig die KI antwortet, hängt vom Modell ab: „openai“ (GPT) lehnt viel ab, „mistral“, „deepseek“ oder „llama“ sind deutlich lockerer. Tippe ins Modell-Feld, um die aktuelle Liste zu sehen.' },
+  pollinations: { endpoint: 'https://text.pollinations.ai/openai', model: 'openai', listUrl: 'https://text.pollinations.ai/models',
+    models: ['openai'],
+    note: 'Kostenlos und ohne Anmeldung. Pollinations ändert die kostenlosen Modelle öfter – die App wählt automatisch ein verfügbares, möglichst lockeres Modell. Tippe ins Modell-Feld, um die aktuelle Liste zu sehen. Lehnt das Modell Bildwünsche ab, geht das Bild trotzdem direkt an die Bild-KI.' },
   openrouter: { endpoint: 'https://openrouter.ai/api/v1/chat/completions', model: 'mistralai/mistral-nemo',
     models: ['mistralai/mistral-nemo','mistralai/mistral-small-3.2-24b-instruct','nousresearch/hermes-3-llama-3.1-70b','deepseek/deepseek-chat','meta-llama/llama-3.3-70b-instruct','qwen/qwen-2.5-72b-instruct'],
     note: 'Key auf openrouter.ai/keys erstellen. Du kannst jedes Modell aus deren Katalog eintragen – offene Modelle (Mistral, Hermes, Llama, Qwen) folgen deinem System-Prompt meist am flexibelsten.' },
@@ -472,6 +472,21 @@ ${known}
 Never mention or explain these tags. Write your normal reply in the user's language first; the tags come at the very end.`;
 }
 
+// Wählt automatisch ein verfügbares Pollinations-Modell (bevorzugt lockere/unzensierte)
+async function pickPollModel(exclude){
+  try{
+    const r = await fetch(PROVIDERS.pollinations.listUrl); const j = await r.json();
+    const list = (Array.isArray(j) ? j : j.data || []).map(m => typeof m === 'string' ? { name: m } : m).filter(m => (m.name || m.id) && m.input_modalities?.includes?.('audio') !== true);
+    liveModels = list.map(m => ({ name: m.name || m.id, desc: m.description || '' }));
+    const names = liveModels.map(m => m.name);
+    if(!exclude && names.includes(cfg.model)) return cfg.model;
+    const score = m => (m.uncensored ? 100 : 0) + (/mistral|deepseek|llama|qwen|grok|hermes|dolphin|evil|unity|roblox/i.test(m.name || m.id) ? 10 : 0) + (/openai|gpt|claude|gemini/i.test(m.name || m.id) ? -5 : 0);
+    const best = list.filter(m => (m.name || m.id) !== exclude).sort((a, b) => score(b) - score(a))[0];
+    if(best){ cfg.model = best.name || best.id; store.set('fc_cfg', cfg); render(); return cfg.model; }
+  }catch{}
+  return cfg.model;
+}
+
 async function chat(text){
   const c = ensureChat(text);
   c.messages.push({ role: 'user', content: text });
@@ -494,10 +509,20 @@ async function chat(text){
   let raw = '';
   const show = () => { const v = stripTags(raw); bubble.innerHTML = v ? fmt(v) : '<span class="typing">schreibt…</span>'; $('messages').scrollTop = $('messages').scrollHeight; };
   busy = true; $('sendBtn').textContent = 'Stopp'; abortCtl = new AbortController();
-  let ok = false;
+  let ok = false, timedOut = false, timer;
+  const arm = () => { clearTimeout(timer); timer = setTimeout(() => { timedOut = true; abortCtl?.abort(); }, 60000); };
   try{
-    const res = await fetch(cfg.endpoint, { method: 'POST', headers, body: JSON.stringify(body), signal: abortCtl.signal });
-    if(!res.ok){ throw new Error('HTTP ' + res.status + ': ' + (await res.text()).slice(0, 400)); }
+    arm();
+    let res;
+    for(let attempt = 0; attempt < 3; attempt++){
+      res = await fetch(cfg.endpoint, { method: 'POST', headers, body: JSON.stringify(body), signal: abortCtl.signal });
+      if(res.ok) break;
+      const errText = await res.text();
+      const modelGone = cfg.provider === 'pollinations' && (res.status === 404 || /model/i.test(errText)) && attempt < 2;
+      if(!modelGone) throw new Error('HTTP ' + res.status + ': ' + errText.slice(0, 400));
+      bubble.innerHTML = '<span class="typing">Modell nicht verfügbar – wechsle automatisch…</span>';
+      body.model = await pickPollModel(body.model); arm();
+    }
     const ct = res.headers.get('content-type') || '';
     if(ct.includes('text/event-stream') && res.body){
       const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = '';
@@ -509,7 +534,7 @@ async function chat(text){
           const l = line.trim(); if(!l.startsWith('data:')) continue;
           const data = l.slice(5).trim(); if(data === '[DONE]') continue;
           try{ const j = JSON.parse(data); const d = j.choices?.[0]?.delta?.content ?? j.choices?.[0]?.message?.content ?? '';
-            if(d){ raw += d; show(); } }catch{}
+            if(d){ raw += d; show(); arm(); } }catch{}
         }
       }
     } else {
@@ -518,11 +543,15 @@ async function chat(text){
     }
     ok = true;
   }catch(e){
-    if(e.name === 'AbortError'){ raw += raw ? '\n\n[abgebrochen]' : '[abgebrochen]'; ok = true; }
-    else { c.messages.pop(); c.messages.push({ role: 'error', content: 'Fehler: ' + e.message + (cfg.provider === 'ollama' ? '\nLäuft Ollama mit OLLAMA_ORIGINS=* ?' : '') }); }
+    if(e.name === 'AbortError' && !timedOut){ raw += raw ? '\n\n[abgebrochen]' : '[abgebrochen]'; ok = true; }
+    else if(timedOut && raw){ ok = true; }
+    else { if(timedOut) e = new Error('Keine Antwort vom Modell (Zeitüberschreitung). Nochmal senden oder unter ⚙ ein anderes Modell wählen.');
+      c.messages.pop(); c.messages.push({ role: 'error', content: 'Fehler: ' + e.message + (cfg.provider === 'ollama' ? '\nLäuft Ollama mit OLLAMA_ORIGINS=* ?' : '') }); }
   }finally{
-    busy = false; abortCtl = null; $('sendBtn').textContent = 'Senden';
+    clearTimeout(timer); busy = false; abortCtl = null; $('sendBtn').textContent = 'Senden';
   }
+  // Chat fehlgeschlagen, aber Bild gewünscht → Bild trotzdem direkt erstellen
+  if(!ok && wantsImage){ save(); render(); addImage(text, false, text); return; }
 
   if(ok){
     for(const m of raw.matchAll(/\[\[\s*CHAR\s*:\s*([^|\]]+)\|([\s\S]*?)\]\]/gi)) upsertChar(c, m[1], m[2]);
@@ -647,6 +676,7 @@ $('input').addEventListener('input', autosize);
 $('lightbox').onclick = () => $('lightbox').style.display = 'none';
 
 applyTheme(); render(); resumeHorde();
+if(cfg.provider === 'pollinations') pickPollModel();
 </script>
 </body>
 </html>
