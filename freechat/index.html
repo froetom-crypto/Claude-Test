@@ -9,6 +9,7 @@
 @media (prefers-color-scheme: light){:root:not([data-theme="dark"]){--bg:#f5f6f8;--panel:#fff;--panel2:#eef0f4;--text:#1a1d24;--muted:#5d6577;--accent:#3d5fe0;--user:#dfe6ff;--border:#d9dde5}}
 :root[data-theme="light"]{--bg:#f5f6f8;--panel:#fff;--panel2:#eef0f4;--text:#1a1d24;--muted:#5d6577;--accent:#3d5fe0;--user:#dfe6ff;--border:#d9dde5}
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
 button,input,select,textarea{font:inherit;color:inherit}
 .app{display:flex;height:100dvh}
@@ -143,13 +144,26 @@ dialog::backdrop{background:#0008}
 
     <h3>Bild-KI</h3>
     <div class="grid2">
-      <div class="field"><label>Bild-Endpoint</label><input id="sImgBase"></div>
-      <div class="field"><label>Bild-Modell</label><input id="sImgModel" list="imgModels"><datalist id="imgModels"><option value="flux">Standard, beste Qualität</option><option value="turbo">schnell, oft weniger streng</option><option value="kontext">mit Referenzbild</option></datalist></div>
+      <div class="field" style="grid-column:1/-1"><label>Bild-Anbieter</label>
+        <select id="sImgProvider">
+          <option value="pollinations">Pollinations (schnell, filtert teilweise)</option>
+          <option value="horde">AI Horde (Stable Diffusion, 18+ Inhalte erlaubt, kostenlos)</option>
+        </select></div>
+      <div class="field pollOnly"><label>Bild-Endpoint</label><input id="sImgBase"></div>
+      <div class="field pollOnly"><label>Bild-Modell</label><input id="sImgModel" list="imgModels"><datalist id="imgModels"><option value="flux">Standard, beste Qualität</option><option value="turbo">schnell, oft weniger streng</option><option value="kontext">mit Referenzbild</option></datalist></div>
       <div class="field"><label>Breite</label><input id="sImgW" type="number" step="64"></div>
       <div class="field"><label>Höhe</label><input id="sImgH" type="number" step="64"></div>
     </div>
-    <div class="field"><label>Pollinations-Schlüssel (empfohlen – kostenlos auf enter.pollinations.ai)</label><input id="sImgKey" type="password" autocomplete="off" placeholder="pk_… oder sk_…"></div>
-    <p class="note">Ohne Schlüssel erlaubt Pollinations nur 1 Bild alle 45 Sekunden – die App wartet dann automatisch. Mit Schlüssel geht es schneller. Der Schlüssel bleibt nur in diesem Browser.</p>
+    <div class="hordeOnly">
+      <div class="grid2">
+        <div class="field"><label>Horde-Modell (leer = beliebiges freies Modell)</label><input id="sHordeModel" list="hordeModels" placeholder="z. B. AlbedoBase XL (SDXL)"><datalist id="hordeModels"></datalist></div>
+        <div class="field"><label>Horde-API-Key (optional, kostenlos auf aihorde.net/register)</label><input id="sHordeKey" type="password" autocomplete="off" placeholder="leer = anonym"></div>
+      </div>
+      <div class="field"><label>Negativ-Prompt (was nicht im Bild sein soll)</label><input id="sHordeNeg"></div>
+      <p class="note">AI Horde ist ein Netzwerk aus Freiwilligen-Rechnern. Anonym wartest du je nach Andrang 20 Sekunden bis wenige Minuten – mit kostenlosem Key kommst du schneller dran. Erwachsenen-Inhalte sind freigeschaltet, Inhalte mit Minderjährigen blockiert die Horde selbst. Bilder liegen dort nur begrenzt – gute Bilder über „Öffnen“ speichern.</p>
+    </div>
+    <div class="field pollOnly"><label>Pollinations-Schlüssel (empfohlen – kostenlos auf enter.pollinations.ai)</label><input id="sImgKey" type="password" autocomplete="off" placeholder="pk_… oder sk_…"></div>
+    <p class="note pollOnly">Ohne Schlüssel erlaubt Pollinations nur 1 Bild alle 45 Sekunden – die App wartet dann automatisch. Mit Schlüssel geht es schneller. Der Schlüssel bleibt nur in diesem Browser.</p>
     <div class="field"><label><input type="checkbox" id="sAuto" style="width:auto"> Bilder automatisch erkennen und generieren</label></div>
     <div class="field"><label><input type="checkbox" id="sRef" style="width:auto"> Letztes Bild als Referenz nutzen (Modell „kontext“, experimentell – noch stärkere Ähnlichkeit)</label></div>
     <div class="field"><label><input type="checkbox" id="sEnhance" style="width:auto"> Prompt automatisch verbessern lassen</label></div>
@@ -202,7 +216,8 @@ const DEFAULTS = {
   key: '', temp: 0.9, maxTok: '',
   system: 'Du bist ein offener, direkter Gesprächspartner. Antworte ehrlich und ohne unnötige Belehrungen oder Warnhinweise. Bleib im Rollenspiel, wenn der Nutzer eines beginnt. Antworte in der Sprache des Nutzers.',
   imgBase: 'https://image.pollinations.ai/prompt/', imgModel: 'flux', imgW: 1024, imgH: 1024, imgKey: '',
-  enhance: false, auto: true, ref: false, theme: ''
+  enhance: false, auto: true, ref: false, theme: '',
+  imgProvider: 'pollinations', hordeModel: '', hordeKey: '', hordeNeg: 'lowres, bad anatomy, bad hands, extra fingers, deformed, blurry, watermark, text'
 };
 // Erkennt ausdrückliche Bildwünsche ("gib mir ein Bild dazu", "zeig mal", "zeichne ...")
 const IMG_REQUEST = /\b(bild|bilder|foto|fotos|picture|image|pic|illustration|zeichnung|selfie|portrait|porträt)\b|\b(zeichne|zeichnen|male|malen|zeig|zeige|zeigen|visualisier\w*|render\w*|generier\w*)\b/i;
@@ -268,7 +283,14 @@ function fmt(text){
 function msgEl(m){
   const wrap = document.createElement('div'); wrap.className = 'msg ' + m.role;
   const b = document.createElement('div'); b.className = 'bubble';
-  if(m.image){
+  if(m.horde && !m.image){
+    wrap.dataset.id = m.id;
+    const st = document.createElement('div'); st.className = 'typing';
+    st.textContent = m.error ? '⚠ ' + m.error : (m.status || '⏳ Warte auf AI Horde…');
+    b.appendChild(st);
+    if(m.error){ const again = document.createElement('button'); again.className = 'btn'; again.textContent = '⟳ Nochmal versuchen'; again.style.marginTop = '6px';
+      again.onclick = () => runHorde(m); b.appendChild(again); }
+  } else if(m.image){
     const img = document.createElement('img'); img.alt = m.content;
     const wait = document.createElement('div'); wait.className = 'typing'; wait.textContent = '🎨 Bild wird erstellt…';
     img.hidden = true;
@@ -288,7 +310,7 @@ function msgEl(m){
     const again = document.createElement('button'); again.className = 'btn'; again.textContent = '↻ Neue Variante';
     again.onclick = () => addImage(m.content, true);
     const reload = document.createElement('button'); reload.className = 'btn'; reload.textContent = '⟳ Neu laden';
-    reload.onclick = () => { m.image = m.image.replace(/&_r=\d+/, '') + '&_r=' + Date.now(); if(!cfg.imgKey){ const l = store.get('fc_lastImg', 0); m.readyAt = Math.max(Date.now(), l + COOLDOWN); store.set('fc_lastImg', m.readyAt); } save(); render(); };
+    reload.onclick = () => { if(m.horde){ m.jobId = ''; m.image = ''; save(); render(); runHorde(m); return; } m.image = m.image.replace(/&_r=\d+/, '') + '&_r=' + Date.now(); if(!cfg.imgKey){ const l = store.get('fc_lastImg', 0); m.readyAt = Math.max(Date.now(), l + COOLDOWN); store.set('fc_lastImg', m.readyAt); } save(); render(); };
     const info = document.createElement('button'); info.className = 'btn'; info.textContent = 'Prompt';
     info.onclick = () => { info.replaceWith(Object.assign(document.createElement('div'), {className: 'note', textContent: m.fullPrompt || m.content})); };
     const pc = document.createElement('button'); pc.className = 'btn'; pc.textContent = 'In Perchance öffnen';
@@ -356,6 +378,10 @@ function imageUrl(prompt, seed, refUrl){
 function addImage(prompt, variant, contextText){
   const c = ensureChat(prompt);
   const full = buildPrompt(c, prompt, contextText);
+  if(cfg.imgProvider === 'horde'){
+    const m = { role: 'assistant', content: prompt, fullPrompt: full, horde: true, id: Date.now().toString(36), seed: variant ? rndSeed() : c.seed };
+    c.messages.push(m); save(); render(); runHorde(m); return;
+  }
   const last = [...c.messages].reverse().find(m => m.image);
   const ref = cfg.ref && last ? last.image : null;
   const now = Date.now();
@@ -364,6 +390,55 @@ function addImage(prompt, variant, contextText){
   c.messages.push({ role: 'assistant', content: prompt, fullPrompt: full, image: imageUrl(full, variant ? rndSeed() : c.seed, ref), readyAt });
   save(); render();
 }
+
+// ---------- AI Horde (Stable Diffusion, NSFW per Opt-in) ----------
+const HORDE = 'https://aihorde.net/api/v2';
+const hordeHeaders = () => ({ 'Content-Type': 'application/json', 'apikey': cfg.hordeKey || '0000000000', 'Client-Agent': 'FreeChat:1.0:anonymous' });
+const snap64 = v => Math.max(256, Math.min(1024, Math.round((Number(v) || 768) / 64) * 64));
+function setHordeStatus(m, text){
+  m.status = text;
+  const el = document.querySelector(`.msg[data-id="${m.id}"] .typing`);
+  if(el) el.textContent = text; else render();
+}
+function findMsg(m){ return chats.flatMap(c => c.messages).includes(m); }
+async function runHorde(m){
+  m.error = ''; m.image = '';
+  try{
+    if(!m.jobId){
+      setHordeStatus(m, '🎨 Auftrag wird an AI Horde gesendet…');
+      const body = {
+        prompt: m.fullPrompt + (cfg.hordeNeg ? ' ### ' + cfg.hordeNeg : ''),
+        params: { width: snap64(cfg.imgW), height: snap64(cfg.imgH), steps: 28, cfg_scale: 7, sampler_name: 'k_euler_a', n: 1, seed: String(m.seed) },
+        nsfw: true, censor_nsfw: false, trusted_workers: false, slow_workers: true, r2: true,
+      };
+      if(cfg.hordeModel) body.models = [cfg.hordeModel];
+      const r = await fetch(HORDE + '/generate/async', { method: 'POST', headers: hordeHeaders(), body: JSON.stringify(body) });
+      const j = await r.json().catch(() => ({}));
+      if(!r.ok || !j.id) throw new Error(j.message || ('HTTP ' + r.status));
+      m.jobId = j.id; save();
+    }
+    while(findMsg(m)){
+      await new Promise(res => setTimeout(res, 4000));
+      const r = await fetch(HORDE + '/generate/check/' + m.jobId, { headers: { 'Client-Agent': 'FreeChat:1.0:anonymous' } });
+      if(r.status === 404) throw new Error('Auftrag abgelaufen – bitte „Neu laden“.');
+      const j = await r.json();
+      if(j.faulted) throw new Error('Der Rechner, der das Bild erstellen sollte, ist ausgefallen.');
+      if(j.is_possible === false) throw new Error('Gerade ist kein passender Rechner frei – anderes Horde-Modell (oder leer lassen) wählen bzw. kleinere Bildgröße.');
+      if(j.done) break;
+      const pos = j.queue_position ? 'Platz ' + j.queue_position + ' in der Warteschlange · ' : '';
+      setHordeStatus(m, '⏳ ' + pos + 'noch ca. ' + Math.max(1, j.wait_time || 0) + ' s' + (j.processing ? ' · wird gerade gemalt' : ''));
+    }
+    if(!findMsg(m)) return;
+    const r = await fetch(HORDE + '/generate/status/' + m.jobId, { headers: { 'Client-Agent': 'FreeChat:1.0:anonymous' } });
+    const j = await r.json();
+    const g = j.generations?.[0];
+    if(!g?.img) throw new Error('Kein Bild erhalten.');
+    m.image = g.img.startsWith('http') ? g.img : 'data:image/webp;base64,' + g.img;
+    m.model = g.model || '';
+  }catch(e){ m.error = e.message; m.jobId = ''; }
+  m.status = ''; save(); render();
+}
+function resumeHorde(){ chats.forEach(c => c.messages.forEach(m => { if(m.horde && !m.image && !m.error && m.jobId) runHorde(m); })); }
 
 function openPerchance(prompt){
   navigator.clipboard?.writeText(prompt).catch(() => {});
@@ -379,7 +454,7 @@ function toast(t){
 
 function imageRules(c){
   const known = c.chars.length ? c.chars.map(x => '- ' + x.name + ': ' + x.look).join('\n') : '(none yet)';
-  const lastImg = [...c.messages].reverse().find(m => m.image);
+  const lastImg = [...c.messages].reverse().find(m => m.image || m.horde);
   return `
 
 [Image tool — follow silently]
@@ -407,7 +482,7 @@ async function chat(text){
 
   const wantsImage = cfg.auto && IMG_REQUEST.test(text);
   const history = c.messages.filter(m => m !== reply && m.role !== 'error')
-    .map(m => m.image ? { role: 'assistant', content: '[Image shown to the user: ' + m.content + ']' } : { role: m.role, content: m.content });
+    .map(m => (m.image || m.horde) ? { role: 'assistant', content: '[Image shown to the user: ' + m.content + ']' } : { role: m.role, content: m.content });
   if(wantsImage) history[history.length - 1] = { role: 'user', content: text + '\n\n(The user wants an image now: end your reply with an [[IMAGE: ...]] line.)' };
   const sys = cfg.system + (cfg.auto ? imageRules(c) : '');
   const body = { model: cfg.model, messages: [{ role: 'system', content: sys }, ...history], temperature: Number(cfg.temp), stream: true };
@@ -459,7 +534,7 @@ async function chat(text){
       if(imgTags.length) addImage(imgTags[0], false, text);
       else if(wantsImage){
         const refused = REFUSAL.test(reply.content);
-        const lastImg = [...c.messages].reverse().find(m => m.image);
+        const lastImg = [...c.messages].reverse().find(m => m.image || m.horde);
         const scene = refused ? (lastImg ? '. Same scene and style as before: ' + lastImg.content : '') : (reply.content ? '. Scene: ' + reply.content.slice(0, 400) : '');
         addImage(text + scene, false, text);
         if(refused) toast('Das Chat-Modell hat abgelehnt – das Bild wird direkt aus deiner Nachricht erstellt. Tipp: anderes Modell unter ⚙ wählen.');
@@ -506,7 +581,7 @@ $('saveChars').onclick = () => {
 
 // ---------- Einstellungen ----------
 const F = { provider:'sProvider', endpoint:'sEndpoint', model:'sModel', key:'sKey', temp:'sTemp', maxTok:'sMaxTok', system:'sSystem',
-  imgBase:'sImgBase', imgModel:'sImgModel', imgW:'sImgW', imgH:'sImgH', imgKey:'sImgKey', theme:'sTheme' };
+  imgBase:'sImgBase', imgModel:'sImgModel', imgProvider:'sImgProvider', hordeModel:'sHordeModel', hordeKey:'sHordeKey', hordeNeg:'sHordeNeg', imgW:'sImgW', imgH:'sImgH', imgKey:'sImgKey', theme:'sTheme' };
 const CB = { enhance:'sEnhance', auto:'sAuto', ref:'sRef' };
 const keysByProvider = store.get('fc_keys', {});
 let liveModels = null;
@@ -525,8 +600,23 @@ function openSettings(){
   for(const [k, id] of Object.entries(F)) $(id).value = cfg[k] ?? '';
   for(const [k, id] of Object.entries(CB)) $(id).checked = !!cfg[k];
   fillSuggestions(cfg.provider);
+  toggleImgFields();
   $('settings').showModal();
 }
+let hordeModelsLoaded = false;
+function toggleImgFields(){
+  const h = $('sImgProvider').value === 'horde';
+  document.querySelectorAll('.pollOnly').forEach(e => e.hidden = h);
+  document.querySelectorAll('.hordeOnly').forEach(e => e.hidden = !h);
+  if(h && !hordeModelsLoaded){
+    hordeModelsLoaded = true;
+    fetch(HORDE + '/status/models?type=image', { headers: { 'Client-Agent': 'FreeChat:1.0:anonymous' } }).then(r => r.json()).then(list => {
+      list.sort((a, b) => (b.count || 0) - (a.count || 0));
+      $('hordeModels').innerHTML = list.map(m => `<option value="${esc(m.name)}">${m.count} Rechner · ca. ${Math.round(m.eta || 0)} s</option>`).join('');
+    }).catch(() => { hordeModelsLoaded = false; });
+  }
+}
+$('sImgProvider').onchange = toggleImgFields;
 $('sProvider').onchange = e => {
   const p = e.target.value;
   keysByProvider[cfg.provider] = $('sKey').value;
@@ -556,7 +646,7 @@ $('input').addEventListener('keydown', e => { if(e.key === 'Enter' && !e.shiftKe
 $('input').addEventListener('input', autosize);
 $('lightbox').onclick = () => $('lightbox').style.display = 'none';
 
-applyTheme(); render();
+applyTheme(); render(); resumeHorde();
 </script>
 </body>
 </html>
