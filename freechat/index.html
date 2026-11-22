@@ -405,11 +405,11 @@ const blockedPrompt = t => MINOR.test(t) && SEXUAL.test(t);
 // Fotorealismus: Prompt-Zusätze und bevorzugte Foto-Modelle auf der Horde
 const REAL_POS = 'RAW photo, photorealistic, realistic, 35mm photograph, natural lighting, sharp focus';
 // Bildausschnitt: Ganzkörper als Standard, Porträt nur auf Wunsch
-const FULL_POS = 'full body shot, wide shot, entire body visible from head to toe, feet visible';
-const FULL_NEG = 'close-up, portrait, headshot, cropped body, cut off legs, out of frame';
+const FULL_POS = 'full body shot, centered composition, standing in the center of the frame, whole body in frame from head to toe, facing the camera, detailed realistic face, sharp eyes';
+const FULL_NEG = 'close-up, portrait, headshot, cropped, cropped head, head out of frame, feet out of frame, cut off legs, partial body, off-center, blurry face, deformed face, distorted face, bad eyes';
 const WANTS_CLOSE = /\b(portrait|porträt|portr\w*|close-?up|nahaufnahme|gesicht|face|headshot|selfie|brustbild|oberkörper|upper body|bust)\b/i;
 const HAS_PERSON = /\b(woman|women|man|men|girl|guy|lady|person|people|couple|she|he|her|him|frau|frauen|mann|männer|person|paar|sie|er|model|character)\b/i;
-const isFullBody = m => m.fullPrompt?.includes(FULL_POS);
+const isFullBody = m => /^full body shot/.test(m.fullPrompt || '') || (m.fullPrompt || '').includes('full body shot, ');
 function negFor(m, real){ return [real ? REAL_NEG : '', isFullBody(m) ? FULL_NEG : '', cfg.hordeNeg || ''].filter(Boolean).join(', '); }
 const REAL_NEG = 'drawing, painting, illustration, anime, cartoon, manga, 3d render, cgi, sketch, digital art, doll, plastic skin, airbrushed';
 const DRAWN = /\b(anime|manga|cartoon|comic|illustration|drawing|painting|sketch|pixel art|3d render|watercolor|zeichnung|gemälde)\b/i;
@@ -545,10 +545,12 @@ async function runHorde(m){
       if(cfg.hordeModel) body.models = [cfg.hordeModel];
       else if(real){ const mods = await pickRealModels(w * h > 600 * 600); if(mods.length) body.models = mods; }
       if(real){ body.params.sampler_name = 'k_dpmpp_2m'; body.params.cfg_scale = 6; }
+      // Gesichtskorrektur: macht kleine Gesichter bei Ganzkörperbildern scharf und realistisch
+      if((real || isFullBody(m)) && !m.noPP){ body.params.post_processing = ['CodeFormers']; body.params.facefixer_strength = 0.6; }
       const r = await fetch(HORDE + '/generate/async', { method: 'POST', headers: hordeHeaders(), body: JSON.stringify(body) });
       const j = await r.json().catch(() => ({}));
       if(!r.ok || !j.id){
-        if(/kudos|576/i.test(j.message || '') && !m.small){ m.small = true; return runHorde(m); }
+        if(/kudos|576/i.test(j.message || '')){ if(body.params.post_processing && !m.noPP){ m.noPP = true; return runHorde(m); } if(!m.small){ m.small = true; return runHorde(m); } }
         throw new Error((j.message || ('HTTP ' + r.status)) + (/kudos/i.test(j.message || '') ? '\n→ Kostenlosen Key auf aihorde.net/register holen und unter ⚙ eintragen, dann klappt es.' : ''));
       }
       m.jobId = j.id; save();
