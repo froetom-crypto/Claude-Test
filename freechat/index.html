@@ -429,15 +429,25 @@ async function runHorde(m){
   try{
     if(!m.jobId){
       setHordeStatus(m, '🎨 Auftrag wird an AI Horde gesendet…');
+      // Anonym erlaubt die Horde nur ca. 576×576 Pixel – Seitenverhältnis beibehalten, Fläche begrenzen
+      let w = snap64(cfg.imgW), h = snap64(cfg.imgH), steps = 28;
+      if(!cfg.hordeKey || m.small){
+        const maxArea = m.small ? 512 * 512 : 576 * 576, f = Math.min(1, Math.sqrt(maxArea / (w * h)));
+        w = Math.max(256, Math.floor(w * f / 64) * 64); h = Math.max(256, Math.floor(h * f / 64) * 64);
+        steps = m.small ? 15 : 20;
+      }
       const body = {
         prompt: m.fullPrompt + (cfg.hordeNeg ? ' ### ' + cfg.hordeNeg : ''),
-        params: { width: snap64(cfg.imgW), height: snap64(cfg.imgH), steps: 28, cfg_scale: 7, sampler_name: 'k_euler_a', n: 1, seed: String(m.seed) },
+        params: { width: w, height: h, steps, cfg_scale: 7, sampler_name: 'k_euler_a', n: 1, seed: String(m.seed), karras: true },
         nsfw: true, censor_nsfw: false, trusted_workers: false, slow_workers: true, r2: true,
       };
       if(cfg.hordeModel) body.models = [cfg.hordeModel];
       const r = await fetch(HORDE + '/generate/async', { method: 'POST', headers: hordeHeaders(), body: JSON.stringify(body) });
       const j = await r.json().catch(() => ({}));
-      if(!r.ok || !j.id) throw new Error(j.message || ('HTTP ' + r.status));
+      if(!r.ok || !j.id){
+        if(/kudos|576/i.test(j.message || '') && !m.small){ m.small = true; return runHorde(m); }
+        throw new Error((j.message || ('HTTP ' + r.status)) + (/kudos/i.test(j.message || '') ? '\n→ Kostenlosen Key auf aihorde.net/register holen und unter ⚙ eintragen, dann klappt es.' : ''));
+      }
       m.jobId = j.id; save();
     }
     while(findMsg(m)){
