@@ -420,18 +420,23 @@ const wantsReal = c => cfg.realism && !DRAWN.test(c?.style || '');
 const REAL_MODELS_SMALL = ['Realistic Vision', "ICBINP - I Can't Believe It's Not Photography", 'Photon', 'epiCRealism', 'CyberRealistic', 'Analog Madness', 'URPM'];
 const REAL_MODELS_XL = ['Juggernaut XL', 'RealVisXL', 'AlbedoBase XL (SDXL)', 'ZavyChroma XL', 'DreamShaper XL'];
 let hordeModelCache = null;
-function getHordeModelNames(){
+function getHordeModels(){
   hordeModelCache ||= fetch(HORDE + '/status/models?type=image', { headers: { 'Client-Agent': 'FreeChat:1.0:anonymous' } })
-    .then(r => r.json()).then(l => l.filter(m => m.count > 0).map(m => m.name)).catch(() => { hordeModelCache = null; return []; });
+    .then(r => r.json()).then(l => l.filter(m => m.count > 0)).catch(() => { hordeModelCache = null; return []; });
   return hordeModelCache;
 }
-async function pickRealModels(big){
-  const live = await getHordeModelNames();
-  const want = big ? [...REAL_MODELS_XL, ...REAL_MODELS_SMALL] : REAL_MODELS_SMALL;
-  const lower = live.map(n => n.toLowerCase());
-  const hits = [];
-  for(const w of want){ const i = lower.findIndex(n => n === w.toLowerCase() || n.startsWith(w.toLowerCase())); if(i >= 0 && !hits.includes(live[i])) hits.push(live[i]); }
-  return hits;
+// Erkennt Foto-Modelle am Namen, schließt Basis-, Anime- und Zeichenmodelle aus
+const PHOTO_RX = /real|photo|epic|cyber|juggernaut|icbinp|believe|analog|urpm|lazymix|majic|absolute|hyper|life|natural|raw|uber|perfect|human|skin|lux|vision/i;
+const NOT_PHOTO_RX = /^stable[ _]?diffusion|anime|anything|waifu|hentai|pony|toon|cartoon|manga|furry|pastel|counterfeit|meina|abyss|orange|cetus|disney|pixar|3d|comic|art|paint|ink|chibi|kawaii|novel|fantasy|dream|deliberate|rev ?anim|mix ?pro|midjourney|openjourney|sketch|pixel/i;
+async function pickRealModels(big, broad){
+  const live = await getHordeModels();
+  const xl = n => /xl|sdxl|flux|sd3|cascade/i.test(n);
+  const ok = m => !NOT_PHOTO_RX.test(m.name) && (big || !xl(m.name));
+  const known = (big ? [...REAL_MODELS_XL, ...REAL_MODELS_SMALL] : REAL_MODELS_SMALL).map(n => n.toLowerCase());
+  const score = m => (known.some(k => m.name.toLowerCase().startsWith(k)) ? 1000 : 0) + (PHOTO_RX.test(m.name) ? 500 : 0) + Math.min(m.count, 50);
+  let list = live.filter(m => ok(m) && (broad || PHOTO_RX.test(m.name) || known.some(k => m.name.toLowerCase().startsWith(k))));
+  if(!list.length) list = live.filter(ok);   // notfalls: irgendein Nicht-Anime-Modell, aber nie das Basismodell
+  return list.sort((a, b) => score(b) - score(a)).slice(0, 6).map(m => m.name);
 }
 
 function buildPrompt(c, prompt, contextText){
@@ -548,7 +553,7 @@ async function runHorde(m){
       const real = wantsReal(chats.find(c => c.messages.includes(m))) && !DRAWN.test(m.fullPrompt.replace(REAL_POS, ''));
       body.prompt = m.fullPrompt + ' ### ' + negFor(m, real);
       if(cfg.hordeModel) body.models = [cfg.hordeModel];
-      else if(real && !m.anyModel){ const mods = await pickRealModels(w * h > 600 * 600); if(mods.length){ body.models = mods; m.autoModels = true; } }
+      else if(real){ const mods = await pickRealModels(w * h > 600 * 600, m.anyModel); if(mods.length){ body.models = mods; m.autoModels = true; } }
       if(real){ body.params.sampler_name = 'k_dpmpp_2m'; body.params.cfg_scale = 6; }
       // Gesichtskorrektur: macht kleine Gesichter bei Ganzkörperbildern scharf und realistisch
       if((real || isFullBody(m)) && !m.noPP){ body.params.post_processing = ['CodeFormers']; body.params.facefixer_strength = 0.4; }
