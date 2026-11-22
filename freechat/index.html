@@ -337,6 +337,7 @@ function msgEl(m){
     const pc = document.createElement('button'); pc.className = 'btn'; pc.textContent = 'In Perchance öffnen';
     pc.onclick = () => openPerchance(m.fullPrompt || m.content);
     bar.append(again, reload, info, pc); b.appendChild(bar);
+    if(m.model){ const mi = document.createElement('div'); mi.className = 'note'; mi.textContent = 'Modell: ' + m.model; b.appendChild(mi); }
   } else if(m.role === 'assistant'){ b.innerHTML = fmt(m.content); }
   else b.textContent = m.content;
   wrap.appendChild(b); return wrap;
@@ -403,19 +404,20 @@ const SEXUAL = /\b(nackt\w*|nude|naked|sex\w*|erotisch\w*|erotic|porn\w*|nsfw|to
 const blockedPrompt = t => MINOR.test(t) && SEXUAL.test(t);
 
 // Fotorealismus: Prompt-Zusätze und bevorzugte Foto-Modelle auf der Horde
-const REAL_POS = 'RAW photo, photorealistic, realistic, 35mm photograph, natural lighting, sharp focus';
+const REAL_PRE = '(RAW photo:1.2) of ';
+const REAL_POS = '(photorealistic:1.3), 35mm photograph, realistic skin, natural light, sharp focus, high detail';
 // Bildausschnitt: Ganzkörper als Standard, Porträt nur auf Wunsch
-const FULL_POS = 'full body shot, centered composition, standing in the center of the frame, whole body in frame from head to toe, facing the camera, detailed realistic face, sharp eyes';
-const FULL_NEG = 'close-up, portrait, headshot, cropped, cropped head, head out of frame, feet out of frame, cut off legs, partial body, off-center, blurry face, deformed face, distorted face, bad eyes';
+const FULL_POS = 'full body shot, centered, whole body in frame from head to toe, facing camera, detailed face';
+const FULL_NEG = 'close-up, portrait, cropped, head out of frame, feet out of frame, off-center, deformed face';
 const WANTS_CLOSE = /\b(portrait|porträt|portr\w*|close-?up|nahaufnahme|gesicht|face|headshot|selfie|brustbild|oberkörper|upper body|bust)\b/i;
 const HAS_PERSON = /\b(woman|women|man|men|girl|guy|lady|person|people|couple|she|he|her|him|frau|frauen|mann|männer|person|paar|sie|er|model|character)\b/i;
-const isFullBody = m => /^full body shot/.test(m.fullPrompt || '') || (m.fullPrompt || '').includes('full body shot, ');
+const isFullBody = m => (m.fullPrompt || '').includes('full body shot, ');
 function negFor(m, real){ return [real ? REAL_NEG : '', isFullBody(m) ? FULL_NEG : '', cfg.hordeNeg || ''].filter(Boolean).join(', '); }
-const REAL_NEG = 'drawing, painting, illustration, anime, cartoon, manga, 3d render, cgi, sketch, digital art, doll, plastic skin, airbrushed';
+const REAL_NEG = '(watercolor, painting, drawing, illustration, sketch, anime, cartoon, 3d render, cgi:1.4), digital art, oil painting, airbrushed, plastic skin, doll';
 const DRAWN = /\b(anime|manga|cartoon|comic|illustration|drawing|painting|sketch|pixel art|3d render|watercolor|zeichnung|gemälde)\b/i;
 const wantsReal = c => cfg.realism && !DRAWN.test(c?.style || '');
 // SD1.5-Foto-Modelle laufen gut bei kleinen Größen (anonym), XL-Modelle brauchen größere Bilder (mit Key)
-const REAL_MODELS_SMALL = ['Realistic Vision', "ICBINP - I Can't Believe It's Not Photography", 'Photon', 'Deliberate', 'CyberRealistic', 'epiCRealism', 'Analog Madness', 'URPM'];
+const REAL_MODELS_SMALL = ['Realistic Vision', "ICBINP - I Can't Believe It's Not Photography", 'Photon', 'epiCRealism', 'CyberRealistic', 'Analog Madness', 'URPM'];
 const REAL_MODELS_XL = ['Juggernaut XL', 'RealVisXL', 'AlbedoBase XL (SDXL)', 'ZavyChroma XL', 'DreamShaper XL'];
 let hordeModelCache = null;
 function getHordeModelNames(){
@@ -434,13 +436,16 @@ async function pickRealModels(big){
 
 function buildPrompt(c, prompt, contextText){
   const used = charsIn(c, prompt + ' ' + (contextText || ''));
-  let p = prompt;
-  if(used.length) p += '. Character appearance (keep exactly): ' + used.map(x => x.name + ': ' + x.look).join('; ');
-  if(c.style) p += '. Style: ' + c.style;
-  if(wantsReal(c) && !DRAWN.test(prompt)) p = REAL_POS + ', ' + p;
+  // Reihenfolge zählt: Stable Diffusion gewichtet den Anfang am stärksten → „Foto von <Motiv>“ zuerst
+  const real = wantsReal(c) && !DRAWN.test(prompt);
   const framing = cfg.framing || 'auto';
   const person = used.length || HAS_PERSON.test(prompt + ' ' + (contextText || ''));
-  if(framing === 'full' || (framing === 'auto' && person && !WANTS_CLOSE.test(prompt + ' ' + (contextText || '')))) p = FULL_POS + ', ' + p;
+  const full = framing === 'full' || (framing === 'auto' && person && !WANTS_CLOSE.test(prompt + ' ' + (contextText || '')));
+  let p = (real ? REAL_PRE : '') + prompt;
+  if(full) p += ', ' + FULL_POS;
+  if(used.length) p += ', ' + used.map(x => x.name + ': ' + x.look).join('; ');
+  if(real) p += ', ' + REAL_POS;
+  if(c.style) p += ', ' + c.style;
   return p.slice(0, 1800);
 }
 function imageUrl(prompt, seed, refUrl){
@@ -543,10 +548,10 @@ async function runHorde(m){
       const real = wantsReal(chats.find(c => c.messages.includes(m))) && !DRAWN.test(m.fullPrompt.replace(REAL_POS, ''));
       body.prompt = m.fullPrompt + ' ### ' + negFor(m, real);
       if(cfg.hordeModel) body.models = [cfg.hordeModel];
-      else if(real){ const mods = await pickRealModels(w * h > 600 * 600); if(mods.length) body.models = mods; }
+      else if(real && !m.anyModel){ const mods = await pickRealModels(w * h > 600 * 600); if(mods.length){ body.models = mods; m.autoModels = true; } }
       if(real){ body.params.sampler_name = 'k_dpmpp_2m'; body.params.cfg_scale = 6; }
       // Gesichtskorrektur: macht kleine Gesichter bei Ganzkörperbildern scharf und realistisch
-      if((real || isFullBody(m)) && !m.noPP){ body.params.post_processing = ['CodeFormers']; body.params.facefixer_strength = 0.6; }
+      if((real || isFullBody(m)) && !m.noPP){ body.params.post_processing = ['CodeFormers']; body.params.facefixer_strength = 0.4; }
       const r = await fetch(HORDE + '/generate/async', { method: 'POST', headers: hordeHeaders(), body: JSON.stringify(body) });
       const j = await r.json().catch(() => ({}));
       if(!r.ok || !j.id){
@@ -561,6 +566,7 @@ async function runHorde(m){
       if(r.status === 404) throw new Error('Auftrag abgelaufen – bitte „Neu laden“.');
       const j = await r.json();
       if(j.faulted) throw new Error('Der Rechner, der das Bild erstellen sollte, ist ausgefallen.');
+      if(j.is_possible === false && m.autoModels && !m.anyModel){ fetch(HORDE + '/generate/status/' + m.jobId, { method: 'DELETE', headers: { 'Client-Agent': 'FreeChat:1.0:anonymous' } }).catch(() => {}); m.anyModel = true; m.jobId = ''; return runHorde(m); }
       if(j.is_possible === false) throw new Error('Gerade ist kein passender Rechner frei – anderes Horde-Modell (oder leer lassen) wählen bzw. kleinere Bildgröße.');
       if(j.done) break;
       const pos = j.queue_position ? 'Platz ' + j.queue_position + ' in der Warteschlange · ' : '';
