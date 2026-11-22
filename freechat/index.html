@@ -144,7 +144,7 @@ dialog::backdrop{background:#0008}
     <h3>Bild-KI</h3>
     <div class="grid2">
       <div class="field"><label>Bild-Endpoint</label><input id="sImgBase"></div>
-      <div class="field"><label>Bild-Modell</label><input id="sImgModel" list="imgModels"><datalist id="imgModels"><option value="flux"><option value="turbo"><option value="kontext"></datalist></div>
+      <div class="field"><label>Bild-Modell</label><input id="sImgModel" list="imgModels"><datalist id="imgModels"><option value="flux">Standard, beste Qualität</option><option value="turbo">schnell, oft weniger streng</option><option value="kontext">mit Referenzbild</option></datalist></div>
       <div class="field"><label>Breite</label><input id="sImgW" type="number" step="64"></div>
       <div class="field"><label>Höhe</label><input id="sImgH" type="number" step="64"></div>
     </div>
@@ -185,9 +185,9 @@ dialog::backdrop{background:#0008}
 
 <script>
 const PROVIDERS = {
-  pollinations: { endpoint: 'https://text.pollinations.ai/openai', model: 'openai',
-    models: ['openai','openai-large','mistral','llama','deepseek','qwen-coder'],
-    note: 'Kostenlos und ohne Anmeldung. Modelle und Limits ändert Pollinations gelegentlich – wenn ein Modell nicht antwortet, probier ein anderes.' },
+  pollinations: { endpoint: 'https://text.pollinations.ai/openai', model: 'mistral', listUrl: 'https://text.pollinations.ai/models',
+    models: ['mistral','deepseek','llama','qwen-coder','openai'],
+    note: 'Kostenlos und ohne Anmeldung. Wie freizügig die KI antwortet, hängt vom Modell ab: „openai“ (GPT) lehnt viel ab, „mistral“, „deepseek“ oder „llama“ sind deutlich lockerer. Tippe ins Modell-Feld, um die aktuelle Liste zu sehen.' },
   openrouter: { endpoint: 'https://openrouter.ai/api/v1/chat/completions', model: 'mistralai/mistral-nemo',
     models: ['mistralai/mistral-nemo','mistralai/mistral-small-3.2-24b-instruct','nousresearch/hermes-3-llama-3.1-70b','deepseek/deepseek-chat','meta-llama/llama-3.3-70b-instruct','qwen/qwen-2.5-72b-instruct'],
     note: 'Key auf openrouter.ai/keys erstellen. Du kannst jedes Modell aus deren Katalog eintragen – offene Modelle (Mistral, Hermes, Llama, Qwen) folgen deinem System-Prompt meist am flexibelsten.' },
@@ -212,6 +212,9 @@ const store = {
   set(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch{} }
 };
 let cfg = Object.assign({}, DEFAULTS, store.get('fc_cfg', {}));
+if(!store.get('fc_mig1', false)){ if(cfg.provider === 'pollinations' && cfg.model === 'openai') cfg.model = 'mistral'; store.set('fc_cfg', cfg); store.set('fc_mig1', true); }
+// Erkennt typische Ablehnungen des Chat-Modells
+const REFUSAL = /(sorry|entschuldig|tut mir leid|leider nicht|kann ich (dir )?(dabei )?nicht|darf ich nicht|nicht (erstellen|generieren|helfen)|I can'?t|I cannot|I'm unable|I am unable|not able to (help|create)|against (my|the) (guidelines|policy))/i;
 let chats = store.get('fc_chats', []);
 let currentId = store.get('fc_current', null);
 let mode = 'chat';
@@ -454,7 +457,13 @@ async function chat(text){
     save(); render();
     if(cfg.auto){
       if(imgTags.length) addImage(imgTags[0], false, text);
-      else if(wantsImage) addImage(text + (reply.content ? '. Scene: ' + reply.content.slice(0, 400) : ''), false, text);
+      else if(wantsImage){
+        const refused = REFUSAL.test(reply.content);
+        const lastImg = [...c.messages].reverse().find(m => m.image);
+        const scene = refused ? (lastImg ? '. Same scene and style as before: ' + lastImg.content : '') : (reply.content ? '. Scene: ' + reply.content.slice(0, 400) : '');
+        addImage(text + scene, false, text);
+        if(refused) toast('Das Chat-Modell hat abgelehnt – das Bild wird direkt aus deiner Nachricht erstellt. Tipp: anderes Modell unter ⚙ wählen.');
+      }
     }
   } else { save(); render(); }
 }
@@ -500,9 +509,17 @@ const F = { provider:'sProvider', endpoint:'sEndpoint', model:'sModel', key:'sKe
   imgBase:'sImgBase', imgModel:'sImgModel', imgW:'sImgW', imgH:'sImgH', imgKey:'sImgKey', theme:'sTheme' };
 const CB = { enhance:'sEnhance', auto:'sAuto', ref:'sRef' };
 const keysByProvider = store.get('fc_keys', {});
+let liveModels = null;
 function fillSuggestions(p){
-  $('modelSuggestions').innerHTML = PROVIDERS[p].models.map(m => `<option value="${m}">`).join('');
+  const opts = list => list.map(m => `<option value="${esc(m.name)}">${esc(m.desc || '')}</option>`).join('');
+  $('modelSuggestions').innerHTML = opts((p === 'pollinations' && liveModels) || PROVIDERS[p].models.map(name => ({ name })));
   $('providerNote').textContent = PROVIDERS[p].note;
+  if(p === 'pollinations' && !liveModels){
+    fetch(PROVIDERS.pollinations.listUrl).then(r => r.json()).then(j => {
+      const arr = (Array.isArray(j) ? j : j.data || []).map(m => typeof m === 'string' ? { name: m } : { name: m.name || m.id, desc: m.description || '' }).filter(m => m.name);
+      if(arr.length){ liveModels = arr; if($('sProvider').value === 'pollinations') $('modelSuggestions').innerHTML = opts(arr); }
+    }).catch(() => {});
+  }
 }
 function openSettings(){
   for(const [k, id] of Object.entries(F)) $(id).value = cfg[k] ?? '';
