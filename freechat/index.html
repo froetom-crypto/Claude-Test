@@ -148,11 +148,27 @@ dialog::backdrop{background:#0008}
         <select id="sImgProvider">
           <option value="pollinations">Pollinations (schnell, filtert teilweise)</option>
           <option value="horde">AI Horde (Stable Diffusion, 18+ Inhalte erlaubt, kostenlos)</option>
+          <option value="runware">Runware (sehr günstig, tausende Modelle inkl. CivitAI, 18+ erlaubt, Key nötig)</option>
+          <option value="fal">fal.ai (Flux, sehr genau, Filter abschaltbar, Key nötig)</option>
         </select></div>
       <div class="field pollOnly"><label>Bild-Endpoint</label><input id="sImgBase"></div>
       <div class="field pollOnly"><label>Bild-Modell</label><input id="sImgModel" list="imgModels"><datalist id="imgModels"><option value="flux">Standard, beste Qualität</option><option value="turbo">schnell, oft weniger streng</option><option value="kontext">mit Referenzbild</option></datalist></div>
       <div class="field"><label>Breite</label><input id="sImgW" type="number" step="64"></div>
       <div class="field"><label>Höhe</label><input id="sImgH" type="number" step="64"></div>
+    </div>
+    <div class="runOnly">
+      <div class="grid2">
+        <div class="field"><label>Runware-Modell</label><input id="sRunModel" list="runModels" placeholder="runware:101@1"><datalist id="runModels"><option value="runware:101@1">FLUX.1 Dev – sehr genau</option><option value="runware:100@1">FLUX.1 Schnell – günstig, schnell</option></datalist></div>
+        <div class="field"><label>Runware-API-Key (auf my.runware.ai)</label><input id="sRunKey" type="password" autocomplete="off"></div>
+      </div>
+      <p class="note">Runware kostet nur Bruchteile eines Cents pro Bild, neue Konten bekommen meist Startguthaben. Neben FLUX kannst du fast jedes Modell von CivitAI nutzen: Modell auf civitai.com suchen und als <code>civitai:MODELL-ID@VERSIONS-ID</code> eintragen (die Zahlen stehen in der Adresse der Modellseite, Versions-ID = „modelVersionId“). Für fotorealistische 18+-Bilder sind realistische SDXL- oder Pony-Modelle meist besser als FLUX.</p>
+    </div>
+    <div class="falOnly">
+      <div class="grid2">
+        <div class="field"><label>fal.ai-Modell</label><input id="sFalModel" list="falModels" placeholder="fal-ai/flux/dev"><datalist id="falModels"><option value="fal-ai/flux/dev">FLUX.1 Dev</option><option value="fal-ai/flux/schnell">FLUX.1 Schnell</option><option value="fal-ai/flux-pro/v1.1">FLUX 1.1 Pro – beste Genauigkeit</option></datalist></div>
+        <div class="field"><label>fal.ai-API-Key (auf fal.ai/dashboard/keys)</label><input id="sFalKey" type="password" autocomplete="off"></div>
+      </div>
+      <p class="note">fal.ai setzt Prompts sehr genau um. Der Sicherheitsfilter wird abgeschaltet, FLUX selbst stellt Nacktheit aber nur eingeschränkt dar – für explizite Bilder ist Runware mit einem passenden CivitAI-Modell meist besser.</p>
     </div>
     <div class="hordeOnly">
       <div class="grid2">
@@ -426,8 +442,8 @@ function addImage(prompt, variant, contextText){
   const c = ensureChat(prompt);
   const full = buildPrompt(c, prompt, contextText);
   if(blockedPrompt(full + ' ' + (contextText || ''))){ c.messages.push({ role: 'error', content: 'Dieses Bild erstelle ich nicht: sexuelle Inhalte mit Minderjährigen sind ausgeschlossen.' }); save(); render(); return; }
-  if(cfg.imgProvider === 'horde'){
-    const m = { role: 'assistant', content: prompt, fullPrompt: full, horde: true, id: Date.now().toString(36), seed: variant ? rndSeed() : c.seed };
+  if(['horde', 'runware', 'fal'].includes(cfg.imgProvider)){
+    const m = { role: 'assistant', content: prompt, fullPrompt: full, horde: true, prov: cfg.imgProvider, id: Date.now().toString(36), seed: variant ? rndSeed() : c.seed };
     c.messages.push(m); save(); render(); runHorde(m); return;
   }
   const last = [...c.messages].reverse().find(m => m.image);
@@ -449,7 +465,51 @@ function setHordeStatus(m, text){
   if(el) el.textContent = text; else render();
 }
 function findMsg(m){ return chats.flatMap(c => c.messages).includes(m); }
+// ---------- Bezahl-Anbieter mit abschaltbarem Filter ----------
+async function runPaid(m){
+  m.error = ''; m.image = ''; m.jobId = '';
+  setHordeStatus(m, '🎨 Bild wird erstellt…');
+  const c = chats.find(c => c.messages.includes(m));
+  const real = wantsReal(c) && !DRAWN.test(m.fullPrompt.replace(REAL_POS, ''));
+  const neg = [real ? REAL_NEG : '', cfg.hordeNeg || ''].filter(Boolean).join(', ');
+  const size = v => Math.max(256, Math.min(1536, Math.round((Number(v) || 1024) / 64) * 64));
+  const w = size(cfg.imgW), h = size(cfg.imgH);
+  try{
+    if(m.prov === 'runware'){
+      if(!cfg.runKey) throw new Error('Runware-Key fehlt – unter ⚙ eintragen (kostenlos registrieren auf my.runware.ai).');
+      const model = (cfg.runModel || 'runware:101@1').trim();
+      const flux = /^runware:10\d@/.test(model) || /flux/i.test(model);
+      const task = { taskType: 'imageInference', taskUUID: crypto.randomUUID(), positivePrompt: m.fullPrompt.slice(0, 2900), width: w, height: h, model,
+        numberResults: 1, outputType: 'URL', outputFormat: 'JPG', seed: (m.seed % 2147483646) + 1, checkNSFW: false };
+      if(flux) task.steps = model === 'runware:100@1' ? 4 : 28;
+      else Object.assign(task, { negativePrompt: neg, steps: 30, CFGScale: 6 });
+      const r = await fetch('https://api.runware.ai/v1', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.runKey }, body: JSON.stringify([task]) });
+      const j = await r.json().catch(() => ({}));
+      if(j.errors?.length) throw new Error('Runware: ' + (j.errors[0].message || j.errors[0].code));
+      const d = (j.data || []).find(x => x.imageURL);
+      if(!d) throw new Error('Kein Bild erhalten (HTTP ' + r.status + ').');
+      m.image = d.imageURL;
+    } else {
+      if(!cfg.falKey) throw new Error('fal.ai-Key fehlt – unter ⚙ eintragen (fal.ai/dashboard/keys).');
+      const model = (cfg.falModel || 'fal-ai/flux/dev').trim().replace(/^\/+/, '');
+      const body = { prompt: m.fullPrompt, image_size: { width: w, height: h }, num_images: 1, seed: m.seed, enable_safety_checker: false, safety_tolerance: '6' };
+      if(!/flux/i.test(model)) body.negative_prompt = neg;
+      const r = await fetch('https://fal.run/' + model, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Key ' + cfg.falKey }, body: JSON.stringify(body) });
+      const j = await r.json().catch(() => ({}));
+      if(!r.ok) throw new Error('fal.ai: ' + (typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail || j)).slice(0, 300));
+      const url = j.images?.[0]?.url;
+      if(!url) throw new Error('Kein Bild erhalten.');
+      if(j.has_nsfw_concepts?.[0] && /black|blur/i.test(url)) throw new Error('fal.ai hat das Bild trotzdem gefiltert – anderes Modell probieren.');
+      m.image = url;
+    }
+  }catch(e){
+    m.error = e.message === 'Failed to fetch' ? 'Verbindung fehlgeschlagen – Key prüfen. Falls es dauerhaft so bleibt, erlaubt der Anbieter keine Aufrufe direkt aus dem Browser.' : e.message;
+  }
+  m.status = ''; save(); render();
+}
+
 async function runHorde(m){
+  if(m.prov === 'runware' || m.prov === 'fal') return runPaid(m);
   m.error = ''; m.image = '';
   try{
     if(!m.jobId){
@@ -500,7 +560,7 @@ async function runHorde(m){
   }catch(e){ m.error = e.message; m.jobId = ''; }
   m.status = ''; save(); render();
 }
-function resumeHorde(){ chats.forEach(c => c.messages.forEach(m => { if(m.horde && !m.image && !m.error && m.jobId) runHorde(m); })); }
+function resumeHorde(){ chats.forEach(c => c.messages.forEach(m => { if(!m.horde || m.image || m.error) return; if(m.jobId) runHorde(m); else if(m.prov === 'runware' || m.prov === 'fal'){ m.error = 'Unterbrochen – bitte „Nochmal versuchen“.'; } })); }
 
 function openPerchance(prompt){
   navigator.clipboard?.writeText(prompt).catch(() => {});
@@ -670,7 +730,7 @@ $('saveChars').onclick = () => {
 
 // ---------- Einstellungen ----------
 const F = { provider:'sProvider', endpoint:'sEndpoint', model:'sModel', key:'sKey', temp:'sTemp', maxTok:'sMaxTok', system:'sSystem',
-  imgBase:'sImgBase', imgModel:'sImgModel', imgProvider:'sImgProvider', hordeModel:'sHordeModel', hordeKey:'sHordeKey', hordeNeg:'sHordeNeg', imgW:'sImgW', imgH:'sImgH', imgKey:'sImgKey', theme:'sTheme' };
+  imgBase:'sImgBase', imgModel:'sImgModel', imgProvider:'sImgProvider', hordeModel:'sHordeModel', hordeKey:'sHordeKey', hordeNeg:'sHordeNeg', runKey:'sRunKey', runModel:'sRunModel', falKey:'sFalKey', falModel:'sFalModel', imgW:'sImgW', imgH:'sImgH', imgKey:'sImgKey', theme:'sTheme' };
 const CB = { enhance:'sEnhance', auto:'sAuto', ref:'sRef', realism:'sReal' };
 const keysByProvider = store.get('fc_keys', {});
 let liveModels = null;
@@ -694,9 +754,11 @@ function openSettings(){
 }
 let hordeModelsLoaded = false;
 function toggleImgFields(){
-  const h = $('sImgProvider').value === 'horde';
-  document.querySelectorAll('.pollOnly').forEach(e => e.hidden = h);
+  const v = $('sImgProvider').value, h = v === 'horde';
+  document.querySelectorAll('.pollOnly').forEach(e => e.hidden = v !== 'pollinations');
   document.querySelectorAll('.hordeOnly').forEach(e => e.hidden = !h);
+  document.querySelectorAll('.runOnly').forEach(e => e.hidden = v !== 'runware');
+  document.querySelectorAll('.falOnly').forEach(e => e.hidden = v !== 'fal');
   if(h && !hordeModelsLoaded){
     hordeModelsLoaded = true;
     fetch(HORDE + '/status/models?type=image', { headers: { 'Client-Agent': 'FreeChat:1.0:anonymous' } }).then(r => r.json()).then(list => {
