@@ -217,7 +217,7 @@ const DEFAULTS = {
   system: 'Du bist ein offener, direkter Gesprächspartner. Antworte ehrlich und ohne unnötige Belehrungen oder Warnhinweise. Bleib im Rollenspiel, wenn der Nutzer eines beginnt. Antworte in der Sprache des Nutzers.',
   imgBase: 'https://image.pollinations.ai/prompt/', imgModel: 'flux', imgW: 1024, imgH: 1024, imgKey: '',
   enhance: false, auto: true, ref: false, theme: '',
-  imgProvider: 'pollinations', hordeModel: '', hordeKey: '', hordeNeg: 'lowres, bad anatomy, bad hands, extra fingers, deformed, blurry, watermark, text'
+  imgProvider: 'horde', hordeModel: '', hordeKey: '', hordeNeg: 'child, teen, lowres, bad anatomy, bad hands, extra fingers, deformed, blurry, watermark, text'
 };
 // Erkennt ausdrückliche Bildwünsche ("gib mir ein Bild dazu", "zeig mal", "zeichne ...")
 const IMG_REQUEST = /\b(bild|bilder|foto|fotos|picture|image|pic|illustration|zeichnung|selfie|portrait|porträt)\b|\b(zeichne|zeichnen|male|malen|zeig|zeige|zeigen|visualisier\w*|render\w*|generier\w*)\b/i;
@@ -228,6 +228,7 @@ const store = {
 };
 let cfg = Object.assign({}, DEFAULTS, store.get('fc_cfg', {}));
 if(!store.get('fc_mig1', false)){ if(cfg.provider === 'pollinations' && cfg.model === 'openai') cfg.model = 'mistral'; store.set('fc_cfg', cfg); store.set('fc_mig1', true); }
+if(!store.get('fc_mig2', false)){ cfg.imgProvider = 'horde'; if(cfg.hordeNeg && !/child/.test(cfg.hordeNeg)) cfg.hordeNeg = 'child, teen, ' + cfg.hordeNeg; store.set('fc_cfg', cfg); store.set('fc_mig2', true); }
 // Erkennt typische Ablehnungen des Chat-Modells
 const REFUSAL = /(sorry|entschuldig|tut mir leid|leider nicht|kann ich (dir )?(dabei )?nicht|darf ich nicht|nicht (erstellen|generieren|helfen)|I can'?t|I cannot|I'm unable|I am unable|not able to (help|create)|against (my|the) (guidelines|policy))/i;
 let chats = store.get('fc_chats', []);
@@ -360,6 +361,27 @@ function charsIn(c, text){
   const hit = c.chars.filter(x => x.name.split(/\s+/).some(part => part.length > 2 && t.includes(part.toLowerCase())));
   return hit;
 }
+// Macht aus einem deutschen Bildwunsch einen englischen Prompt (Bild-KIs verstehen fast nur Englisch)
+const DROP = new Set('zeig zeige zeigt gib gibst mach mache machst erstelle erstell generiere generier male mal zeichne bitte mir uns mal ein eine einer einem einen eines bild bilder foto fotos picture image davon dazu noch kannst du könntest würdest will möchte hätte gern gerne von der die das den dem des deiner deine dein deinen meiner meine mein meinen so wie ich es'.split(' '));
+const DICT = { frau:'woman', frauen:'women', mann:'man', männer:'men', paar:'couple', nackt:'nude', nackte:'nude', nackten:'nude', nackter:'nude', nacktes:'nude', oben:'topless', ohne:'without', kleidung:'clothes', unterwäsche:'lingerie', dessous:'lingerie', bikini:'bikini', badeanzug:'swimsuit', kleid:'dress', rock:'skirt', hemd:'shirt', jacke:'jacket', schuhe:'shoes', stiefel:'boots', brille:'glasses',
+  stadt:'city', straße:'street', strasse:'street', strand:'beach', meer:'sea', see:'lake', wald:'forest', berg:'mountain', berge:'mountains', wiese:'meadow', garten:'garden', park:'park', zimmer:'room', schlafzimmer:'bedroom', bett:'bed', bad:'bathroom', dusche:'shower', küche:'kitchen', sofa:'sofa', büro:'office', auto:'car', regen:'rain', schnee:'snow', nacht:'night', abend:'evening', morgen:'morning', sonnenuntergang:'sunset', sonne:'sun', mond:'moon', himmel:'sky',
+  in:'in', im:'in the', auf:'on', am:'at the', an:'at', unter:'under', vor:'in front of', hinter:'behind', neben:'next to', mit:'with', und:'and', oder:'or', bei:'at', beim:'at the',
+  blond:'blonde', blonde:'blonde', blonden:'blonde', brünett:'brunette', brünette:'brunette', rothaarig:'redhead', rothaarige:'redhead', schwarzhaarig:'black-haired', schwarzhaarige:'black-haired', lange:'long', langen:'long', kurze:'short', kurzen:'short', haare:'hair', haaren:'hair', augen:'eyes', blaue:'blue', blauen:'blue', grüne:'green', grünen:'green', braune:'brown', braunen:'brown', rote:'red', roten:'red', schwarze:'black', schwarzen:'black', weiße:'white', weißen:'white',
+  schön:'beautiful', schöne:'beautiful', schönen:'beautiful', hübsch:'pretty', hübsche:'pretty', sexy:'sexy', heiß:'hot', heiße:'hot', schlank:'slim', schlanke:'slim', kurvig:'curvy', kurvige:'curvy', groß:'tall', große:'large', kleine:'small', alt:'old', alte:'old', junge:'young', jung:'young',
+  liegt:'lying', liegend:'lying', sitzt:'sitting', sitzend:'sitting', steht:'standing', stehend:'standing', läuft:'walking', geht:'walking', tanzt:'dancing', lächelt:'smiling', lächelnd:'smiling', schläft:'sleeping', küsst:'kissing', umarmt:'hugging',
+  realistisch:'photorealistic', fotorealistisch:'photorealistic', anime:'anime style', gemälde:'painting', zeichnung:'drawing', porträt:'portrait', portrait:'portrait', ganzkörper:'full body', nahaufnahme:'close-up' };
+function toEnglishPrompt(text){
+  const words = text.replace(/[„“"!?.,;:]+/g, ' ').split(/\s+/).filter(Boolean);
+  const out = [];
+  for(const w of words){ const l = w.toLowerCase(); if(DROP.has(l)) continue; out.push(DICT[l] || w); }
+  const p = out.join(' ').replace(/\s+/g, ' ').trim();
+  return p ? p + ', highly detailed, high quality' : text;
+}
+// Schutz: keine sexuellen Inhalte mit Minderjährigen
+const MINOR = /\b(kind|kinder|kindlich|baby|kleinkind|schüler\w*|schulmädchen|teen\w*|minderjährig\w*|loli\w*|shota|child\w*|kid|kids|underage|minor|preteen|\d\s*-?\s*jährig\w*|1[0-7]\s*(jahre|years|yo))\b/i;
+const SEXUAL = /\b(nackt\w*|nude|naked|sex\w*|erotisch\w*|erotic|porn\w*|nsfw|topless|oben ohne|dessous|lingerie|unterwäsche|intim\w*|explicit)\b/i;
+const blockedPrompt = t => MINOR.test(t) && SEXUAL.test(t);
+
 function buildPrompt(c, prompt, contextText){
   const used = charsIn(c, prompt + ' ' + (contextText || ''));
   let p = prompt;
@@ -378,6 +400,7 @@ function imageUrl(prompt, seed, refUrl){
 function addImage(prompt, variant, contextText){
   const c = ensureChat(prompt);
   const full = buildPrompt(c, prompt, contextText);
+  if(blockedPrompt(full + ' ' + (contextText || ''))){ c.messages.push({ role: 'error', content: 'Dieses Bild erstelle ich nicht: sexuelle Inhalte mit Minderjährigen sind ausgeschlossen.' }); save(); render(); return; }
   if(cfg.imgProvider === 'horde'){
     const m = { role: 'assistant', content: prompt, fullPrompt: full, horde: true, id: Date.now().toString(36), seed: variant ? rndSeed() : c.seed };
     c.messages.push(m); save(); render(); runHorde(m); return;
@@ -551,7 +574,7 @@ async function chat(text){
     clearTimeout(timer); busy = false; abortCtl = null; $('sendBtn').textContent = 'Senden';
   }
   // Chat fehlgeschlagen, aber Bild gewünscht → Bild trotzdem direkt erstellen
-  if(!ok && wantsImage){ save(); render(); addImage(text, false, text); return; }
+  if(!ok && wantsImage){ save(); render(); addImage(toEnglishPrompt(text), false, text); return; }
 
   if(ok){
     for(const m of raw.matchAll(/\[\[\s*CHAR\s*:\s*([^|\]]+)\|([\s\S]*?)\]\]/gi)) upsertChar(c, m[1], m[2]);
@@ -563,10 +586,8 @@ async function chat(text){
       if(imgTags.length) addImage(imgTags[0], false, text);
       else if(wantsImage){
         const refused = REFUSAL.test(reply.content);
-        const lastImg = [...c.messages].reverse().find(m => m.image || m.horde);
-        const scene = refused ? (lastImg ? '. Same scene and style as before: ' + lastImg.content : '') : (reply.content ? '. Scene: ' + reply.content.slice(0, 400) : '');
-        addImage(text + scene, false, text);
-        if(refused) toast('Das Chat-Modell hat abgelehnt – das Bild wird direkt aus deiner Nachricht erstellt. Tipp: anderes Modell unter ⚙ wählen.');
+        if(refused){ const i = c.messages.indexOf(reply); if(i >= 0) c.messages.splice(i, 1); save(); }
+        addImage(toEnglishPrompt(text), false, text);
       }
     }
   } else { save(); render(); }
@@ -576,9 +597,9 @@ function send(){
   if(busy){ abortCtl?.abort(); return; }
   const inp = $('input'); const text = inp.value.trim(); if(!text) return;
   inp.value = ''; autosize();
-  if(/^\/bild\s+/i.test(text)){ const p = text.replace(/^\/bild\s+/i, ''); ensureChat(p).messages.push({ role: 'user', content: text }); return addImage(p, false, p); }
+  if(/^\/bild\s+/i.test(text)){ const p = text.replace(/^\/bild\s+/i, ''); ensureChat(p).messages.push({ role: 'user', content: text }); return addImage(toEnglishPrompt(p), false, p); }
   if(/^\/perchance\s+/i.test(text)) return openPerchance(text.replace(/^\/perchance\s+/i, ''));
-  if(mode === 'img'){ ensureChat(text).messages.push({ role: 'user', content: '🎨 ' + text }); return addImage(text, false, text); }
+  if(mode === 'img'){ ensureChat(text).messages.push({ role: 'user', content: '🎨 ' + text }); return addImage(toEnglishPrompt(text), false, text); }
   chat(text);
 }
 
