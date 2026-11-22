@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FreeChat</title>
+<style>
+:root{--bg:#0f1115;--panel:#171a21;--panel2:#1f232c;--text:#e6e8ee;--muted:#8b93a7;--accent:#7c9cff;--user:#2a3350;--border:#2a2f3a;--danger:#ff6b6b}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){--bg:#f5f6f8;--panel:#fff;--panel2:#eef0f4;--text:#1a1d24;--muted:#5d6577;--accent:#3d5fe0;--user:#dfe6ff;--border:#d9dde5}}
+:root[data-theme="light"]{--bg:#f5f6f8;--panel:#fff;--panel2:#eef0f4;--text:#1a1d24;--muted:#5d6577;--accent:#3d5fe0;--user:#dfe6ff;--border:#d9dde5}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+button,input,select,textarea{font:inherit;color:inherit}
+.app{display:flex;height:100dvh}
+aside{width:260px;background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0}
+aside .top{padding:12px;display:flex;gap:8px}
+.btn{background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:8px 12px;cursor:pointer}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.btn.icon{padding:8px 10px}
+#chatList{flex:1;overflow:auto;padding:0 8px 8px}
+.chatItem{display:flex;align-items:center;gap:6px;padding:8px 10px;border-radius:8px;cursor:pointer;color:var(--muted);white-space:nowrap;overflow:hidden}
+.chatItem span{flex:1;overflow:hidden;text-overflow:ellipsis}
+.chatItem.active,.chatItem:hover{background:var(--panel2);color:var(--text)}
+.chatItem .del{opacity:0;border:0;background:none;cursor:pointer;color:var(--muted)}
+.chatItem:hover .del{opacity:1}
+main{flex:1;display:flex;flex-direction:column;min-width:0}
+header{display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--border);background:var(--panel)}
+header h1{font-size:16px;margin:0;flex:1}
+header .model{color:var(--muted);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#menuBtn{display:none}
+#messages{flex:1;overflow:auto;padding:20px 16px}
+.msg{max-width:820px;margin:0 auto 16px;display:flex}
+.msg .bubble{padding:10px 14px;border-radius:12px;white-space:pre-wrap;word-wrap:break-word;max-width:100%}
+.msg.user{justify-content:flex-end}
+.msg.user .bubble{background:var(--user)}
+.msg.assistant .bubble{background:var(--panel)}
+.msg.error .bubble{background:transparent;border:1px solid var(--danger);color:var(--danger)}
+.msg img{max-width:100%;border-radius:10px;display:block;margin-top:6px;cursor:zoom-in}
+.msg .imgbar{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap}
+.msg .imgbar a,.msg .imgbar button{font-size:12px;padding:4px 8px}
+.msg code{background:var(--panel2);padding:1px 5px;border-radius:4px}
+.msg pre{background:var(--panel2);padding:10px;border-radius:8px;overflow:auto;white-space:pre}
+.empty{max-width:640px;margin:10vh auto;text-align:center;color:var(--muted)}
+.empty h2{color:var(--text)}
+.composer{border-top:1px solid var(--border);padding:12px 16px;background:var(--panel)}
+.composer .row{max-width:820px;margin:0 auto;display:flex;gap:8px;align-items:flex-end}
+.composer textarea{flex:1;resize:none;background:var(--panel2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;max-height:200px;min-height:44px}
+.composer .hint{max-width:820px;margin:6px auto 0;font-size:12px;color:var(--muted)}
+.modeToggle{display:flex;border:1px solid var(--border);border-radius:10px;overflow:hidden}
+.modeToggle button{border:0;background:var(--panel2);padding:10px 12px;cursor:pointer}
+.modeToggle button.on{background:var(--accent);color:#fff}
+dialog{background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:14px;padding:0;width:min(640px,calc(100vw - 32px));max-height:calc(100dvh - 32px)}
+dialog::backdrop{background:#0008}
+.dlg{padding:18px;overflow:auto;max-height:calc(100dvh - 40px)}
+.dlg h2{margin:0 0 12px;font-size:18px}
+.dlg h3{margin:18px 0 8px;font-size:14px;color:var(--accent);text-transform:uppercase;letter-spacing:.04em}
+.field{display:flex;flex-direction:column;gap:4px;margin-bottom:10px}
+.field label{font-size:13px;color:var(--muted)}
+.field input,.field select,.field textarea{background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;width:100%}
+.field textarea{min-height:90px;resize:vertical}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.note{font-size:12px;color:var(--muted);margin:4px 0 10px}
+.dlgActions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
+#lightbox{position:fixed;inset:0;background:#000d;display:none;align-items:center;justify-content:center;z-index:50;cursor:zoom-out}
+#lightbox img{max-width:95vw;max-height:95vh}
+@media (max-width:760px){
+  aside{position:fixed;inset:0 auto 0 0;z-index:20;transform:translateX(-100%);transition:transform .2s}
+  aside.open{transform:none}
+  #menuBtn{display:inline-block}
+  .grid2{grid-template-columns:1fr}
+  #messages{padding:16px}
+  .composer{padding:10px 16px}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside id="sidebar">
+    <div class="top">
+      <button class="btn primary" id="newChat" style="flex:1">+ Neuer Chat</button>
+      <button class="btn icon" id="settingsBtn" title="Einstellungen">⚙</button>
+    </div>
+    <div id="chatList"></div>
+  </aside>
+  <main>
+    <header>
+      <button class="btn icon" id="menuBtn">☰</button>
+      <h1 id="chatTitle">FreeChat</h1>
+      <div class="model" id="modelLabel"></div>
+    </header>
+    <div id="messages"></div>
+    <div class="composer">
+      <div class="row">
+        <div class="modeToggle">
+          <button id="modeChat" class="on" title="Chat">💬</button>
+          <button id="modeImg" title="Bild generieren">🎨</button>
+        </div>
+        <textarea id="input" rows="1" placeholder="Nachricht schreiben…"></textarea>
+        <button class="btn primary" id="sendBtn">Senden</button>
+      </div>
+      <div class="hint">Enter = senden · Shift+Enter = neue Zeile · <code>/bild …</code> erzeugt ein Bild · <code>/perchance …</code> öffnet Perchance mit deinem Prompt</div>
+    </div>
+  </main>
+</div>
+
+<dialog id="settings">
+  <div class="dlg">
+    <h2>Einstellungen</h2>
+
+    <h3>Text-KI</h3>
+    <div class="field">
+      <label>Anbieter</label>
+      <select id="sProvider">
+        <option value="pollinations">Pollinations (kostenlos, kein Key)</option>
+        <option value="openrouter">OpenRouter (eigener API-Key, hunderte Modelle)</option>
+        <option value="ollama">Ollama (lokal auf deinem Rechner)</option>
+        <option value="custom">Eigener OpenAI-kompatibler Endpoint</option>
+      </select>
+    </div>
+    <div class="grid2">
+      <div class="field"><label>Endpoint (Chat Completions)</label><input id="sEndpoint"></div>
+      <div class="field"><label>Modell</label><input id="sModel" list="modelSuggestions"><datalist id="modelSuggestions"></datalist></div>
+    </div>
+    <div class="field"><label>API-Key (bleibt nur in deinem Browser)</label><input id="sKey" type="password" autocomplete="off"></div>
+    <p class="note" id="providerNote"></p>
+    <div class="grid2">
+      <div class="field"><label>Temperatur</label><input id="sTemp" type="number" step="0.1" min="0" max="2"></div>
+      <div class="field"><label>Max. Tokens (leer = Standard)</label><input id="sMaxTok" type="number" min="1"></div>
+    </div>
+    <div class="field">
+      <label>System-Prompt (Persönlichkeit / Regeln der KI – frei editierbar)</label>
+      <textarea id="sSystem"></textarea>
+    </div>
+
+    <h3>Bild-KI</h3>
+    <div class="grid2">
+      <div class="field"><label>Bild-Endpoint</label><input id="sImgBase"></div>
+      <div class="field"><label>Bild-Modell</label><input id="sImgModel" list="imgModels"><datalist id="imgModels"><option value="flux"><option value="turbo"><option value="kontext"></datalist></div>
+      <div class="field"><label>Breite</label><input id="sImgW" type="number" step="64"></div>
+      <div class="field"><label>Höhe</label><input id="sImgH" type="number" step="64"></div>
+    </div>
+    <div class="field"><label>Bild-API-Token (optional, für höhere Limits)</label><input id="sImgKey" type="password" autocomplete="off"></div>
+    <div class="field"><label><input type="checkbox" id="sEnhance" style="width:auto"> Prompt automatisch verbessern lassen</label></div>
+
+    <h3>Darstellung</h3>
+    <div class="field"><label>Theme</label>
+      <select id="sTheme"><option value="">System</option><option value="dark">Dunkel</option><option value="light">Hell</option></select>
+    </div>
+
+    <div class="dlgActions">
+      <button class="btn" id="exportBtn">Chats exportieren</button>
+      <button class="btn" id="cancelSettings">Abbrechen</button>
+      <button class="btn primary" id="saveSettings">Speichern</button>
+    </div>
+  </div>
+</dialog>
+
+<div id="lightbox"><img alt=""></div>
+
+<script>
+const PROVIDERS = {
+  pollinations: { endpoint: 'https://text.pollinations.ai/openai', model: 'openai',
+    models: ['openai','openai-large','mistral','llama','deepseek','qwen-coder'],
+    note: 'Kostenlos und ohne Anmeldung. Modelle und Limits ändert Pollinations gelegentlich – wenn ein Modell nicht antwortet, probier ein anderes.' },
+  openrouter: { endpoint: 'https://openrouter.ai/api/v1/chat/completions', model: 'mistralai/mistral-nemo',
+    models: ['mistralai/mistral-nemo','mistralai/mistral-small-3.2-24b-instruct','nousresearch/hermes-3-llama-3.1-70b','deepseek/deepseek-chat','meta-llama/llama-3.3-70b-instruct','qwen/qwen-2.5-72b-instruct'],
+    note: 'Key auf openrouter.ai/keys erstellen. Du kannst jedes Modell aus deren Katalog eintragen – offene Modelle (Mistral, Hermes, Llama, Qwen) folgen deinem System-Prompt meist am flexibelsten.' },
+  ollama: { endpoint: 'http://localhost:11434/v1/chat/completions', model: 'llama3.1',
+    models: ['llama3.1','mistral','qwen2.5','gemma2','dolphin-mistral'],
+    note: 'Läuft komplett auf deinem Rechner, nichts verlässt dein Gerät. Ollama mit OLLAMA_ORIGINS=* starten, damit der Browser zugreifen darf. Modelle mit "ollama pull <name>" laden.' },
+  custom: { endpoint: '', model: '', models: [],
+    note: 'Jeder Dienst mit OpenAI-kompatibler /chat/completions-Schnittstelle (z. B. LM Studio, Together, Groq, Mistral, KoboldCpp).' }
+};
+const DEFAULTS = {
+  provider: 'pollinations', endpoint: PROVIDERS.pollinations.endpoint, model: PROVIDERS.pollinations.model,
+  key: '', temp: 0.9, maxTok: '',
+  system: 'Du bist ein offener, direkter Gesprächspartner. Antworte ehrlich und ohne unnötige Belehrungen oder Warnhinweise. Bleib im Rollenspiel, wenn der Nutzer eines beginnt. Antworte in der Sprache des Nutzers.',
+  imgBase: 'https://image.pollinations.ai/prompt/', imgModel: 'flux', imgW: 1024, imgH: 1024, imgKey: '', enhance: false, theme: ''
+};
+
+const store = {
+  get(k, d){ try{ const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; }catch{ return d; } },
+  set(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch{} }
+};
+let cfg = Object.assign({}, DEFAULTS, store.get('fc_cfg', {}));
+let chats = store.get('fc_chats', []);
+let currentId = store.get('fc_current', null);
+let mode = 'chat';
+let busy = false;
+let abortCtl = null;
+
+const $ = id => document.getElementById(id);
+const save = () => { store.set('fc_chats', chats); store.set('fc_current', currentId); };
+const cur = () => chats.find(c => c.id === currentId);
+
+function applyTheme(){ if(cfg.theme) document.documentElement.dataset.theme = cfg.theme; else delete document.documentElement.dataset.theme; }
+
+function newChat(){
+  const c = { id: Date.now().toString(36) + Math.random().toString(36).slice(2,6), title: 'Neuer Chat', messages: [] };
+  chats.unshift(c); currentId = c.id; save(); render();
+  $('input').focus();
+}
+
+function renderList(){
+  const list = $('chatList'); list.innerHTML = '';
+  chats.forEach(c => {
+    const d = document.createElement('div');
+    d.className = 'chatItem' + (c.id === currentId ? ' active' : '');
+    const s = document.createElement('span'); s.textContent = c.title; d.appendChild(s);
+    const x = document.createElement('button'); x.className = 'del'; x.textContent = '✕'; x.title = 'Löschen';
+    x.onclick = e => { e.stopPropagation(); if(!confirm('Chat löschen?')) return;
+      chats = chats.filter(o => o.id !== c.id); if(currentId === c.id) currentId = chats[0]?.id || null; save(); render(); };
+    d.appendChild(x);
+    d.onclick = () => { currentId = c.id; save(); render(); $('sidebar').classList.remove('open'); };
+    list.appendChild(d);
+  });
+}
+
+function esc(s){ return s.replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])); }
+function fmt(text){
+  let h = esc(text);
+  h = h.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, l, code) => '<pre><code>' + code + '</code></pre>');
+  h = h.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+  h = h.replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>');
+  h = h.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<i>$2</i>');
+  return h;
+}
+
+function msgEl(m){
+  const wrap = document.createElement('div'); wrap.className = 'msg ' + m.role;
+  const b = document.createElement('div'); b.className = 'bubble';
+  if(m.image){
+    b.innerHTML = '<div>🎨 ' + esc(m.content) + '</div>';
+    const img = document.createElement('img'); img.src = m.image; img.alt = m.content; img.loading = 'lazy';
+    img.onclick = () => { $('lightbox').querySelector('img').src = m.image; $('lightbox').style.display = 'flex'; };
+    img.onerror = () => { img.replaceWith(Object.assign(document.createElement('div'), {textContent: '⚠ Bild konnte nicht geladen werden – nochmal versuchen oder Modell/Endpoint in den Einstellungen ändern.'})); };
+    b.appendChild(img);
+    const bar = document.createElement('div'); bar.className = 'imgbar';
+    bar.innerHTML = `<a class="btn" href="${esc(m.image)}" target="_blank" rel="noopener">Öffnen</a>`;
+    const again = document.createElement('button'); again.className = 'btn'; again.textContent = '↻ Neue Variante';
+    again.onclick = () => genImage(m.content);
+    const pc = document.createElement('button'); pc.className = 'btn'; pc.textContent = 'In Perchance öffnen';
+    pc.onclick = () => openPerchance(m.content);
+    bar.append(again, pc); b.appendChild(bar);
+  } else if(m.role === 'assistant'){ b.innerHTML = fmt(m.content); }
+  else b.textContent = m.content;
+  wrap.appendChild(b); return wrap;
+}
+
+function renderMessages(){
+  const box = $('messages'); box.innerHTML = '';
+  const c = cur();
+  if(!c || !c.messages.length){
+    box.innerHTML = `<div class="empty"><h2>FreeChat</h2><p>Chatte mit einem Modell deiner Wahl und generiere Bilder. Anbieter, Modell und System-Prompt stellst du über ⚙ ein.</p><p>Tipp: Wechsle unten auf 🎨 oder schreib <code>/bild ein Fuchs im Neonregen</code>.</p></div>`;
+    return;
+  }
+  c.messages.forEach(m => box.appendChild(msgEl(m)));
+  box.scrollTop = box.scrollHeight;
+}
+
+function render(){
+  renderList(); renderMessages();
+  const c = cur(); $('chatTitle').textContent = c ? c.title : 'FreeChat';
+  $('modelLabel').textContent = cfg.model + ' · ' + cfg.provider;
+}
+
+function setMode(m){ mode = m; $('modeChat').classList.toggle('on', m==='chat'); $('modeImg').classList.toggle('on', m==='img');
+  $('input').placeholder = m === 'img' ? 'Bild beschreiben…' : 'Nachricht schreiben…'; }
+
+function ensureChat(firstText){
+  if(!cur()) newChat();
+  const c = cur();
+  if(c.title === 'Neuer Chat' && firstText) c.title = firstText.slice(0, 40);
+  return c;
+}
+
+function imageUrl(prompt){
+  const seed = Math.floor(Math.random() * 1e9);
+  const p = new URLSearchParams({ width: cfg.imgW, height: cfg.imgH, seed, model: cfg.imgModel, nologo: 'true', private: 'true', safe: 'false' });
+  if(cfg.enhance) p.set('enhance', 'true');
+  if(cfg.imgKey) p.set('token', cfg.imgKey);
+  const base = cfg.imgBase.endsWith('/') ? cfg.imgBase : cfg.imgBase + '/';
+  return base + encodeURIComponent(prompt) + '?' + p.toString();
+}
+
+function genImage(prompt){
+  const c = ensureChat(prompt);
+  c.messages.push({ role: 'user', content: '/bild ' + prompt });
+  c.messages.push({ role: 'assistant', content: prompt, image: imageUrl(prompt) });
+  save(); render();
+}
+
+function openPerchance(prompt){
+  try{ navigator.clipboard.writeText(prompt); }catch{}
+  window.open('https://perchance.org/ai-text-to-image-generator', '_blank', 'noopener');
+  toast('Prompt in die Zwischenablage kopiert – in Perchance einfügen.');
+}
+
+function toast(t){
+  const d = document.createElement('div'); d.textContent = t;
+  Object.assign(d.style, {position:'fixed',bottom:'90px',left:'50%',transform:'translateX(-50%)',background:'var(--panel2)',border:'1px solid var(--border)',padding:'8px 14px',borderRadius:'8px',zIndex:60});
+  document.body.appendChild(d); setTimeout(() => d.remove(), 3000);
+}
+
+async function chat(text){
+  const c = ensureChat(text);
+  c.messages.push({ role: 'user', content: text });
+  const reply = { role: 'assistant', content: '' };
+  c.messages.push(reply); save(); render();
+  const bubble = $('messages').lastElementChild.querySelector('.bubble');
+  bubble.textContent = '…';
+
+  const history = c.messages.filter(m => !m.image && m !== reply && m.role !== 'error').map(m => ({ role: m.role, content: m.content }));
+  const body = { model: cfg.model, messages: [{ role: 'system', content: cfg.system }, ...history], temperature: Number(cfg.temp), stream: true };
+  if(cfg.maxTok) body.max_tokens = Number(cfg.maxTok);
+  const headers = { 'Content-Type': 'application/json' };
+  if(cfg.key) headers['Authorization'] = 'Bearer ' + cfg.key;
+  if(cfg.provider === 'openrouter'){ headers['HTTP-Referer'] = location.origin || 'http://localhost'; headers['X-Title'] = 'FreeChat'; }
+
+  busy = true; $('sendBtn').textContent = 'Stopp'; abortCtl = new AbortController();
+  try{
+    const res = await fetch(cfg.endpoint, { method: 'POST', headers, body: JSON.stringify(body), signal: abortCtl.signal });
+    if(!res.ok){ throw new Error('HTTP ' + res.status + ': ' + (await res.text()).slice(0, 400)); }
+    const ct = res.headers.get('content-type') || '';
+    if(ct.includes('text/event-stream') && res.body){
+      const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = '';
+      while(true){
+        const { done, value } = await reader.read(); if(done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split('\n'); buf = lines.pop();
+        for(const line of lines){
+          const l = line.trim(); if(!l.startsWith('data:')) continue;
+          const data = l.slice(5).trim(); if(data === '[DONE]') continue;
+          try{ const j = JSON.parse(data); const d = j.choices?.[0]?.delta?.content ?? j.choices?.[0]?.message?.content ?? '';
+            if(d){ reply.content += d; bubble.innerHTML = fmt(reply.content); $('messages').scrollTop = $('messages').scrollHeight; } }catch{}
+        }
+      }
+    } else {
+      const raw = await res.text();
+      try{ const j = JSON.parse(raw); reply.content = j.choices?.[0]?.message?.content ?? j.message?.content ?? raw; }
+      catch{ reply.content = raw; }
+    }
+    if(!reply.content) reply.content = '(keine Antwort erhalten – anderes Modell probieren)';
+  }catch(e){
+    if(e.name === 'AbortError'){ reply.content += reply.content ? '\n\n[abgebrochen]' : '[abgebrochen]'; }
+    else { c.messages.pop(); c.messages.push({ role: 'error', content: 'Fehler: ' + e.message + (cfg.provider === 'ollama' ? '\nLäuft Ollama mit OLLAMA_ORIGINS=* ?' : '') }); }
+  }finally{
+    busy = false; abortCtl = null; $('sendBtn').textContent = 'Senden'; save(); render();
+  }
+}
+
+function send(){
+  if(busy){ abortCtl?.abort(); return; }
+  const inp = $('input'); const text = inp.value.trim(); if(!text) return;
+  inp.value = ''; autosize();
+  if(/^\/bild\s+/i.test(text)) return genImage(text.replace(/^\/bild\s+/i, ''));
+  if(/^\/perchance\s+/i.test(text)) return openPerchance(text.replace(/^\/perchance\s+/i, ''));
+  if(mode === 'img') return genImage(text);
+  chat(text);
+}
+
+function autosize(){ const t = $('input'); t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 200) + 'px'; }
+
+// Settings
+const F = { provider:'sProvider', endpoint:'sEndpoint', model:'sModel', key:'sKey', temp:'sTemp', maxTok:'sMaxTok', system:'sSystem',
+  imgBase:'sImgBase', imgModel:'sImgModel', imgW:'sImgW', imgH:'sImgH', imgKey:'sImgKey', theme:'sTheme' };
+const keysByProvider = store.get('fc_keys', {});
+function fillSuggestions(p){
+  $('modelSuggestions').innerHTML = PROVIDERS[p].models.map(m => `<option value="${m}">`).join('');
+  $('providerNote').textContent = PROVIDERS[p].note;
+}
+function openSettings(){
+  for(const [k, id] of Object.entries(F)) $(id).value = cfg[k] ?? '';
+  $('sEnhance').checked = !!cfg.enhance;
+  fillSuggestions(cfg.provider);
+  $('settings').showModal();
+}
+$('sProvider').onchange = e => {
+  const p = e.target.value;
+  keysByProvider[cfg.provider] = $('sKey').value;
+  $('sEndpoint').value = PROVIDERS[p].endpoint; $('sModel').value = PROVIDERS[p].model;
+  $('sKey').value = keysByProvider[p] || '';
+  fillSuggestions(p);
+};
+$('saveSettings').onclick = () => {
+  for(const [k, id] of Object.entries(F)) cfg[k] = $(id).value;
+  cfg.enhance = $('sEnhance').checked;
+  keysByProvider[cfg.provider] = cfg.key; store.set('fc_keys', keysByProvider);
+  store.set('fc_cfg', cfg); applyTheme(); $('settings').close(); render();
+};
+$('cancelSettings').onclick = () => $('settings').close();
+$('exportBtn').onclick = () => {
+  const blob = new Blob([JSON.stringify(chats, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'freechat-export.json'; a.click();
+};
+
+$('settingsBtn').onclick = openSettings;
+$('newChat').onclick = () => { newChat(); $('sidebar').classList.remove('open'); };
+$('menuBtn').onclick = () => $('sidebar').classList.toggle('open');
+$('modeChat').onclick = () => setMode('chat');
+$('modeImg').onclick = () => setMode('img');
+$('sendBtn').onclick = send;
+$('input').addEventListener('keydown', e => { if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); send(); } });
+$('input').addEventListener('input', autosize);
+$('lightbox').onclick = () => $('lightbox').style.display = 'none';
+
+applyTheme(); render();
+</script>
+</body>
+</html>
