@@ -26,7 +26,7 @@ aside .top{padding:12px;display:flex;gap:8px}
 .chatItem:hover .del{opacity:1}
 main{flex:1;display:flex;flex-direction:column;min-width:0}
 header{display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--border);background:var(--panel)}
-header h1{font-size:16px;margin:0;flex:1}
+header h1{font-size:16px;margin:0;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 header .model{color:var(--muted);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #menuBtn{display:none}
 #messages{flex:1;overflow:auto;padding:20px 16px}
@@ -73,6 +73,8 @@ dialog::backdrop{background:#0008}
   aside{position:fixed;inset:0 auto 0 0;z-index:20;transform:translateX(-100%);transition:transform .2s}
   aside.open{transform:none}
   #menuBtn{display:inline-block}
+  header .model{display:none}
+  header{padding:10px 16px}
   .grid2{grid-template-columns:1fr}
   #messages{padding:16px}
   .composer{padding:10px 16px}
@@ -146,7 +148,8 @@ dialog::backdrop{background:#0008}
       <div class="field"><label>Breite</label><input id="sImgW" type="number" step="64"></div>
       <div class="field"><label>Höhe</label><input id="sImgH" type="number" step="64"></div>
     </div>
-    <div class="field"><label>Bild-API-Token (optional, für höhere Limits)</label><input id="sImgKey" type="password" autocomplete="off"></div>
+    <div class="field"><label>Pollinations-Schlüssel (empfohlen – kostenlos auf enter.pollinations.ai)</label><input id="sImgKey" type="password" autocomplete="off" placeholder="pk_… oder sk_…"></div>
+    <p class="note">Ohne Schlüssel erlaubt Pollinations nur 1 Bild alle 45 Sekunden – die App wartet dann automatisch. Mit Schlüssel geht es schneller. Der Schlüssel bleibt nur in diesem Browser.</p>
     <div class="field"><label><input type="checkbox" id="sAuto" style="width:auto"> Bilder automatisch erkennen und generieren</label></div>
     <div class="field"><label><input type="checkbox" id="sRef" style="width:auto"> Letztes Bild als Referenz nutzen (Modell „kontext“, experimentell – noch stärkere Ähnlichkeit)</label></div>
     <div class="field"><label><input type="checkbox" id="sEnhance" style="width:auto"> Prompt automatisch verbessern lassen</label></div>
@@ -218,6 +221,7 @@ let abortCtl = null;
 const $ = id => document.getElementById(id);
 const save = () => { store.set('fc_chats', chats); store.set('fc_current', currentId); };
 const cur = () => chats.find(c => c.id === currentId);
+const COOLDOWN = 47000; // Pollinations ohne Schlüssel: 1 Bild / 45 s
 const rndSeed = () => Math.floor(Math.random() * 1e9);
 
 function normChat(c){ c.chars ||= []; c.seed ||= rndSeed(); c.style ||= ''; return c; }
@@ -262,9 +266,17 @@ function msgEl(m){
   const wrap = document.createElement('div'); wrap.className = 'msg ' + m.role;
   const b = document.createElement('div'); b.className = 'bubble';
   if(m.image){
-    const img = document.createElement('img'); img.src = m.image; img.alt = m.content; img.loading = 'lazy';
+    const img = document.createElement('img'); img.alt = m.content;
     const wait = document.createElement('div'); wait.className = 'typing'; wait.textContent = '🎨 Bild wird erstellt…';
-    img.onload = () => wait.remove();
+    img.hidden = true;
+    img.onload = () => { wait.remove(); img.hidden = false; };
+    const start = () => { if(wrap.isConnected) img.src = m.image; };
+    const delay = (m.readyAt || 0) - Date.now();
+    if(delay > 0){
+      const tick = () => { if(!wrap.isConnected) return; const s = Math.ceil(((m.readyAt || 0) - Date.now()) / 1000);
+        if(s <= 0){ wait.textContent = '🎨 Bild wird erstellt…'; start(); } else { wait.textContent = '⏳ Kostenloses Limit: Bild kommt in ' + s + ' s (mit Schlüssel geht es sofort)'; setTimeout(tick, 1000); } };
+      setTimeout(tick, 0);
+    } else img.src = m.image;
     img.onclick = () => { $('lightbox').querySelector('img').src = m.image; $('lightbox').style.display = 'flex'; };
     img.onerror = () => { wait.remove(); img.replaceWith(Object.assign(document.createElement('div'), {textContent: '⚠ Bild konnte nicht geladen werden – „Neue Variante“ probieren oder Bild-Modell in den Einstellungen ändern.'})); };
     b.append(wait, img);
@@ -272,11 +284,13 @@ function msgEl(m){
     bar.innerHTML = `<a class="btn" href="${esc(m.image)}" target="_blank" rel="noopener">Öffnen</a>`;
     const again = document.createElement('button'); again.className = 'btn'; again.textContent = '↻ Neue Variante';
     again.onclick = () => addImage(m.content, true);
+    const reload = document.createElement('button'); reload.className = 'btn'; reload.textContent = '⟳ Neu laden';
+    reload.onclick = () => { m.image = m.image.replace(/&_r=\d+/, '') + '&_r=' + Date.now(); if(!cfg.imgKey){ const l = store.get('fc_lastImg', 0); m.readyAt = Math.max(Date.now(), l + COOLDOWN); store.set('fc_lastImg', m.readyAt); } save(); render(); };
     const info = document.createElement('button'); info.className = 'btn'; info.textContent = 'Prompt';
     info.onclick = () => { info.replaceWith(Object.assign(document.createElement('div'), {className: 'note', textContent: m.fullPrompt || m.content})); };
     const pc = document.createElement('button'); pc.className = 'btn'; pc.textContent = 'In Perchance öffnen';
     pc.onclick = () => openPerchance(m.fullPrompt || m.content);
-    bar.append(again, info, pc); b.appendChild(bar);
+    bar.append(again, reload, info, pc); b.appendChild(bar);
   } else if(m.role === 'assistant'){ b.innerHTML = fmt(m.content); }
   else b.textContent = m.content;
   wrap.appendChild(b); return wrap;
@@ -332,8 +346,8 @@ function imageUrl(prompt, seed, refUrl){
   const p = new URLSearchParams({ width: cfg.imgW, height: cfg.imgH, seed, model: cfg.imgModel, nologo: 'true', private: 'true', safe: 'false' });
   if(refUrl){ p.set('model', 'kontext'); p.set('image', refUrl); }
   if(cfg.enhance) p.set('enhance', 'true');
-  if(cfg.imgKey) p.set('token', cfg.imgKey);
-  const base = cfg.imgBase.endsWith('/') ? cfg.imgBase : cfg.imgBase + '/';
+  let base = cfg.imgBase.endsWith('/') ? cfg.imgBase : cfg.imgBase + '/';
+  if(cfg.imgKey){ p.set('key', cfg.imgKey); if(base.includes('image.pollinations.ai')) base = 'https://gen.pollinations.ai/image/'; }
   return base + encodeURIComponent(prompt) + '?' + p.toString();
 }
 function addImage(prompt, variant, contextText){
@@ -341,7 +355,10 @@ function addImage(prompt, variant, contextText){
   const full = buildPrompt(c, prompt, contextText);
   const last = [...c.messages].reverse().find(m => m.image);
   const ref = cfg.ref && last ? last.image : null;
-  c.messages.push({ role: 'assistant', content: prompt, fullPrompt: full, image: imageUrl(full, variant ? rndSeed() : c.seed, ref) });
+  const now = Date.now();
+  let readyAt = now;
+  if(!cfg.imgKey){ const last = store.get('fc_lastImg', 0); readyAt = Math.max(now, last + COOLDOWN); store.set('fc_lastImg', readyAt); }
+  c.messages.push({ role: 'assistant', content: prompt, fullPrompt: full, image: imageUrl(full, variant ? rndSeed() : c.seed, ref), readyAt });
   save(); render();
 }
 
