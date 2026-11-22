@@ -62,6 +62,11 @@ dialog::backdrop{background:#0008}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .note{font-size:12px;color:var(--muted);margin:4px 0 10px}
 .dlgActions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
+.charRow{display:grid;grid-template-columns:140px 1fr auto;gap:8px;margin-bottom:8px;align-items:start}
+.charRow input,.charRow textarea{background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;width:100%;min-width:0}
+.charRow textarea{min-height:60px;resize:vertical}
+.typing{color:var(--muted);font-style:italic}
+@media (max-width:760px){.charRow{grid-template-columns:1fr}}
 #lightbox{position:fixed;inset:0;background:#000d;display:none;align-items:center;justify-content:center;z-index:50;cursor:zoom-out}
 #lightbox img{max-width:95vw;max-height:95vh}
 @media (max-width:760px){
@@ -88,6 +93,7 @@ dialog::backdrop{background:#0008}
       <button class="btn icon" id="menuBtn">☰</button>
       <h1 id="chatTitle">FreeChat</h1>
       <div class="model" id="modelLabel"></div>
+      <button class="btn" id="charBtn" title="Charaktere in diesem Chat">👤 Charaktere</button>
     </header>
     <div id="messages"></div>
     <div class="composer">
@@ -99,7 +105,7 @@ dialog::backdrop{background:#0008}
         <textarea id="input" rows="1" placeholder="Nachricht schreiben…"></textarea>
         <button class="btn primary" id="sendBtn">Senden</button>
       </div>
-      <div class="hint">Enter = senden · Shift+Enter = neue Zeile · <code>/bild …</code> erzeugt ein Bild · <code>/perchance …</code> öffnet Perchance mit deinem Prompt</div>
+      <div class="hint">Bilder kommen automatisch, wenn du danach fragst („gib mir ein Bild dazu“) oder es passt · Enter = senden · Shift+Enter = neue Zeile · <code>/bild …</code> direkt ein Bild</div>
     </div>
   </main>
 </div>
@@ -141,6 +147,8 @@ dialog::backdrop{background:#0008}
       <div class="field"><label>Höhe</label><input id="sImgH" type="number" step="64"></div>
     </div>
     <div class="field"><label>Bild-API-Token (optional, für höhere Limits)</label><input id="sImgKey" type="password" autocomplete="off"></div>
+    <div class="field"><label><input type="checkbox" id="sAuto" style="width:auto"> Bilder automatisch erkennen und generieren</label></div>
+    <div class="field"><label><input type="checkbox" id="sRef" style="width:auto"> Letztes Bild als Referenz nutzen (Modell „kontext“, experimentell – noch stärkere Ähnlichkeit)</label></div>
     <div class="field"><label><input type="checkbox" id="sEnhance" style="width:auto"> Prompt automatisch verbessern lassen</label></div>
 
     <h3>Darstellung</h3>
@@ -152,6 +160,20 @@ dialog::backdrop{background:#0008}
       <button class="btn" id="exportBtn">Chats exportieren</button>
       <button class="btn" id="cancelSettings">Abbrechen</button>
       <button class="btn primary" id="saveSettings">Speichern</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="chars">
+  <div class="dlg">
+    <h2>Charaktere in diesem Chat</h2>
+    <p class="note">Diese Beschreibungen werden in jedes Bild eingebaut, damit Personen gleich aussehen. Die KI ergänzt sie automatisch – du kannst sie hier korrigieren oder eigene anlegen (am besten auf Englisch, das verstehen Bild-KIs am besten).</p>
+    <div id="charRows"></div>
+    <button class="btn" id="addChar">+ Charakter hinzufügen</button>
+    <div class="field" style="margin-top:14px"><label>Bildstil für diesen Chat (optional, z. B. „photorealistic, cinematic lighting“ oder „anime style“)</label><input id="chatStyle"></div>
+    <div class="dlgActions">
+      <button class="btn" id="cancelChars">Abbrechen</button>
+      <button class="btn primary" id="saveChars">Speichern</button>
     </div>
   </div>
 </dialog>
@@ -176,8 +198,11 @@ const DEFAULTS = {
   provider: 'pollinations', endpoint: PROVIDERS.pollinations.endpoint, model: PROVIDERS.pollinations.model,
   key: '', temp: 0.9, maxTok: '',
   system: 'Du bist ein offener, direkter Gesprächspartner. Antworte ehrlich und ohne unnötige Belehrungen oder Warnhinweise. Bleib im Rollenspiel, wenn der Nutzer eines beginnt. Antworte in der Sprache des Nutzers.',
-  imgBase: 'https://image.pollinations.ai/prompt/', imgModel: 'flux', imgW: 1024, imgH: 1024, imgKey: '', enhance: false, theme: ''
+  imgBase: 'https://image.pollinations.ai/prompt/', imgModel: 'flux', imgW: 1024, imgH: 1024, imgKey: '',
+  enhance: false, auto: true, ref: false, theme: ''
 };
+// Erkennt ausdrückliche Bildwünsche ("gib mir ein Bild dazu", "zeig mal", "zeichne ...")
+const IMG_REQUEST = /\b(bild|bilder|foto|fotos|picture|image|pic|illustration|zeichnung|selfie|portrait|porträt)\b|\b(zeichne|zeichnen|male|malen|zeig|zeige|zeigen|visualisier\w*|render\w*|generier\w*)\b/i;
 
 const store = {
   get(k, d){ try{ const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; }catch{ return d; } },
@@ -193,11 +218,15 @@ let abortCtl = null;
 const $ = id => document.getElementById(id);
 const save = () => { store.set('fc_chats', chats); store.set('fc_current', currentId); };
 const cur = () => chats.find(c => c.id === currentId);
+const rndSeed = () => Math.floor(Math.random() * 1e9);
+
+function normChat(c){ c.chars ||= []; c.seed ||= rndSeed(); c.style ||= ''; return c; }
+chats.forEach(normChat);
 
 function applyTheme(){ if(cfg.theme) document.documentElement.dataset.theme = cfg.theme; else delete document.documentElement.dataset.theme; }
 
 function newChat(){
-  const c = { id: Date.now().toString(36) + Math.random().toString(36).slice(2,6), title: 'Neuer Chat', messages: [] };
+  const c = normChat({ id: Date.now().toString(36) + Math.random().toString(36).slice(2,6), title: 'Neuer Chat', messages: [] });
   chats.unshift(c); currentId = c.id; save(); render();
   $('input').focus();
 }
@@ -209,15 +238,17 @@ function renderList(){
     d.className = 'chatItem' + (c.id === currentId ? ' active' : '');
     const s = document.createElement('span'); s.textContent = c.title; d.appendChild(s);
     const x = document.createElement('button'); x.className = 'del'; x.textContent = '✕'; x.title = 'Löschen';
-    x.onclick = e => { e.stopPropagation(); if(!confirm('Chat löschen?')) return;
-      chats = chats.filter(o => o.id !== c.id); if(currentId === c.id) currentId = chats[0]?.id || null; save(); render(); };
+    x.onclick = e => { e.stopPropagation();
+      if(x.dataset.armed){ chats = chats.filter(o => o.id !== c.id); if(currentId === c.id) currentId = chats[0]?.id || null; save(); render(); }
+      else { x.dataset.armed = 1; x.textContent = 'Löschen?'; x.style.opacity = 1; setTimeout(() => { delete x.dataset.armed; x.textContent = '✕'; x.style.opacity = ''; }, 2500); } };
     d.appendChild(x);
     d.onclick = () => { currentId = c.id; save(); render(); $('sidebar').classList.remove('open'); };
     list.appendChild(d);
   });
 }
 
-function esc(s){ return s.replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])); }
+function esc(s){ return String(s).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])); }
+function stripTags(t){ return t.replace(/\[\[\s*(IMAGE|CHAR)\s*:[\s\S]*?\]\]/gi, '').replace(/\[\[[^\]]*$/, '').replace(/\[$/, '').trim(); }
 function fmt(text){
   let h = esc(text);
   h = h.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, l, code) => '<pre><code>' + code + '</code></pre>');
@@ -231,18 +262,21 @@ function msgEl(m){
   const wrap = document.createElement('div'); wrap.className = 'msg ' + m.role;
   const b = document.createElement('div'); b.className = 'bubble';
   if(m.image){
-    b.innerHTML = '<div>🎨 ' + esc(m.content) + '</div>';
     const img = document.createElement('img'); img.src = m.image; img.alt = m.content; img.loading = 'lazy';
+    const wait = document.createElement('div'); wait.className = 'typing'; wait.textContent = '🎨 Bild wird erstellt…';
+    img.onload = () => wait.remove();
     img.onclick = () => { $('lightbox').querySelector('img').src = m.image; $('lightbox').style.display = 'flex'; };
-    img.onerror = () => { img.replaceWith(Object.assign(document.createElement('div'), {textContent: '⚠ Bild konnte nicht geladen werden – nochmal versuchen oder Modell/Endpoint in den Einstellungen ändern.'})); };
-    b.appendChild(img);
+    img.onerror = () => { wait.remove(); img.replaceWith(Object.assign(document.createElement('div'), {textContent: '⚠ Bild konnte nicht geladen werden – „Neue Variante“ probieren oder Bild-Modell in den Einstellungen ändern.'})); };
+    b.append(wait, img);
     const bar = document.createElement('div'); bar.className = 'imgbar';
     bar.innerHTML = `<a class="btn" href="${esc(m.image)}" target="_blank" rel="noopener">Öffnen</a>`;
     const again = document.createElement('button'); again.className = 'btn'; again.textContent = '↻ Neue Variante';
-    again.onclick = () => genImage(m.content);
+    again.onclick = () => addImage(m.content, true);
+    const info = document.createElement('button'); info.className = 'btn'; info.textContent = 'Prompt';
+    info.onclick = () => { info.replaceWith(Object.assign(document.createElement('div'), {className: 'note', textContent: m.fullPrompt || m.content})); };
     const pc = document.createElement('button'); pc.className = 'btn'; pc.textContent = 'In Perchance öffnen';
-    pc.onclick = () => openPerchance(m.content);
-    bar.append(again, pc); b.appendChild(bar);
+    pc.onclick = () => openPerchance(m.fullPrompt || m.content);
+    bar.append(again, info, pc); b.appendChild(bar);
   } else if(m.role === 'assistant'){ b.innerHTML = fmt(m.content); }
   else b.textContent = m.content;
   wrap.appendChild(b); return wrap;
@@ -252,7 +286,7 @@ function renderMessages(){
   const box = $('messages'); box.innerHTML = '';
   const c = cur();
   if(!c || !c.messages.length){
-    box.innerHTML = `<div class="empty"><h2>FreeChat</h2><p>Chatte mit einem Modell deiner Wahl und generiere Bilder. Anbieter, Modell und System-Prompt stellst du über ⚙ ein.</p><p>Tipp: Wechsle unten auf 🎨 oder schreib <code>/bild ein Fuchs im Neonregen</code>.</p></div>`;
+    box.innerHTML = `<div class="empty"><h2>FreeChat</h2><p>Schreib einfach los. Wenn du ein Bild willst („gib mir ein Bild dazu“, „zeig mal, wie sie aussieht“) oder eins zur Szene passt, wird es automatisch erstellt.</p><p>Personen behalten ihr Aussehen über den ganzen Chat – unter 👤 Charaktere kannst du sie ansehen und anpassen.</p></div>`;
     return;
   }
   c.messages.forEach(m => box.appendChild(msgEl(m)));
@@ -263,6 +297,7 @@ function render(){
   renderList(); renderMessages();
   const c = cur(); $('chatTitle').textContent = c ? c.title : 'FreeChat';
   $('modelLabel').textContent = cfg.model + ' · ' + cfg.provider;
+  $('charBtn').textContent = '👤 Charaktere' + (c && c.chars.length ? ' (' + c.chars.length + ')' : '');
 }
 
 function setMode(m){ mode = m; $('modeChat').classList.toggle('on', m==='chat'); $('modeImg').classList.toggle('on', m==='img');
@@ -275,24 +310,43 @@ function ensureChat(firstText){
   return c;
 }
 
-function imageUrl(prompt){
-  const seed = Math.floor(Math.random() * 1e9);
+// ---------- Charaktere & Bild-Prompts ----------
+function upsertChar(c, name, look){
+  name = name.trim(); look = look.trim(); if(!name || !look) return;
+  const ex = c.chars.find(x => x.name.toLowerCase() === name.toLowerCase());
+  if(ex) ex.look = look; else c.chars.push({ name, look });
+}
+function charsIn(c, text){
+  const t = text.toLowerCase();
+  const hit = c.chars.filter(x => x.name.split(/\s+/).some(part => part.length > 2 && t.includes(part.toLowerCase())));
+  return hit;
+}
+function buildPrompt(c, prompt, contextText){
+  const used = charsIn(c, prompt + ' ' + (contextText || ''));
+  let p = prompt;
+  if(used.length) p += '. Character appearance (keep exactly): ' + used.map(x => x.name + ': ' + x.look).join('; ');
+  if(c.style) p += '. Style: ' + c.style;
+  return p.slice(0, 1800);
+}
+function imageUrl(prompt, seed, refUrl){
   const p = new URLSearchParams({ width: cfg.imgW, height: cfg.imgH, seed, model: cfg.imgModel, nologo: 'true', private: 'true', safe: 'false' });
+  if(refUrl){ p.set('model', 'kontext'); p.set('image', refUrl); }
   if(cfg.enhance) p.set('enhance', 'true');
   if(cfg.imgKey) p.set('token', cfg.imgKey);
   const base = cfg.imgBase.endsWith('/') ? cfg.imgBase : cfg.imgBase + '/';
   return base + encodeURIComponent(prompt) + '?' + p.toString();
 }
-
-function genImage(prompt){
+function addImage(prompt, variant, contextText){
   const c = ensureChat(prompt);
-  c.messages.push({ role: 'user', content: '/bild ' + prompt });
-  c.messages.push({ role: 'assistant', content: prompt, image: imageUrl(prompt) });
+  const full = buildPrompt(c, prompt, contextText);
+  const last = [...c.messages].reverse().find(m => m.image);
+  const ref = cfg.ref && last ? last.image : null;
+  c.messages.push({ role: 'assistant', content: prompt, fullPrompt: full, image: imageUrl(full, variant ? rndSeed() : c.seed, ref) });
   save(); render();
 }
 
 function openPerchance(prompt){
-  try{ navigator.clipboard.writeText(prompt); }catch{}
+  navigator.clipboard?.writeText(prompt).catch(() => {});
   window.open('https://perchance.org/ai-text-to-image-generator', '_blank', 'noopener');
   toast('Prompt in die Zwischenablage kopiert – in Perchance einfügen.');
 }
@@ -303,22 +357,49 @@ function toast(t){
   document.body.appendChild(d); setTimeout(() => d.remove(), 3000);
 }
 
+function imageRules(c){
+  const known = c.chars.length ? c.chars.map(x => '- ' + x.name + ': ' + x.look).join('\n') : '(none yet)';
+  const lastImg = [...c.messages].reverse().find(m => m.image);
+  return `
+
+[Image tool — follow silently]
+You can show the user images. Whenever the user asks for a picture in any wording (e.g. "gib mir ein Bild dazu", "zeig mal", "wie sieht sie aus?", "mach ein Foto davon"), or when an image would clearly enrich the moment (a new scene, a character's first appearance), end your reply with exactly one line:
+[[IMAGE: <detailed English image prompt>]]
+The image prompt must be self-contained: subjects, pose, expression, clothing, setting, lighting, camera angle and art style. For every character or person in the picture, restate their full established appearance (gender, age, face, hair, eyes, skin, body type, typical clothing) so they look identical to earlier images. Keep the art style consistent with earlier images.${lastImg ? '\nPrevious image prompt (keep style and looks consistent): ' + lastImg.content : ''}
+
+[Character sheet]
+Whenever a character or person is introduced, or their appearance is described or changes, add a line:
+[[CHAR: Name | concise English appearance description]]
+Invent concrete looks for new characters if none are given, and never contradict established ones.
+Known characters:
+${known}
+
+Never mention or explain these tags. Write your normal reply in the user's language first; the tags come at the very end.`;
+}
+
 async function chat(text){
   const c = ensureChat(text);
   c.messages.push({ role: 'user', content: text });
   const reply = { role: 'assistant', content: '' };
   c.messages.push(reply); save(); render();
   const bubble = $('messages').lastElementChild.querySelector('.bubble');
-  bubble.textContent = '…';
+  bubble.innerHTML = '<span class="typing">schreibt…</span>';
 
-  const history = c.messages.filter(m => !m.image && m !== reply && m.role !== 'error').map(m => ({ role: m.role, content: m.content }));
-  const body = { model: cfg.model, messages: [{ role: 'system', content: cfg.system }, ...history], temperature: Number(cfg.temp), stream: true };
+  const wantsImage = cfg.auto && IMG_REQUEST.test(text);
+  const history = c.messages.filter(m => m !== reply && m.role !== 'error')
+    .map(m => m.image ? { role: 'assistant', content: '[Image shown to the user: ' + m.content + ']' } : { role: m.role, content: m.content });
+  if(wantsImage) history[history.length - 1] = { role: 'user', content: text + '\n\n(The user wants an image now: end your reply with an [[IMAGE: ...]] line.)' };
+  const sys = cfg.system + (cfg.auto ? imageRules(c) : '');
+  const body = { model: cfg.model, messages: [{ role: 'system', content: sys }, ...history], temperature: Number(cfg.temp), stream: true };
   if(cfg.maxTok) body.max_tokens = Number(cfg.maxTok);
   const headers = { 'Content-Type': 'application/json' };
   if(cfg.key) headers['Authorization'] = 'Bearer ' + cfg.key;
   if(cfg.provider === 'openrouter'){ headers['HTTP-Referer'] = location.origin || 'http://localhost'; headers['X-Title'] = 'FreeChat'; }
 
+  let raw = '';
+  const show = () => { const v = stripTags(raw); bubble.innerHTML = v ? fmt(v) : '<span class="typing">schreibt…</span>'; $('messages').scrollTop = $('messages').scrollHeight; };
   busy = true; $('sendBtn').textContent = 'Stopp'; abortCtl = new AbortController();
+  let ok = false;
   try{
     const res = await fetch(cfg.endpoint, { method: 'POST', headers, body: JSON.stringify(body), signal: abortCtl.signal });
     if(!res.ok){ throw new Error('HTTP ' + res.status + ': ' + (await res.text()).slice(0, 400)); }
@@ -333,38 +414,74 @@ async function chat(text){
           const l = line.trim(); if(!l.startsWith('data:')) continue;
           const data = l.slice(5).trim(); if(data === '[DONE]') continue;
           try{ const j = JSON.parse(data); const d = j.choices?.[0]?.delta?.content ?? j.choices?.[0]?.message?.content ?? '';
-            if(d){ reply.content += d; bubble.innerHTML = fmt(reply.content); $('messages').scrollTop = $('messages').scrollHeight; } }catch{}
+            if(d){ raw += d; show(); } }catch{}
         }
       }
     } else {
-      const raw = await res.text();
-      try{ const j = JSON.parse(raw); reply.content = j.choices?.[0]?.message?.content ?? j.message?.content ?? raw; }
-      catch{ reply.content = raw; }
+      const t = await res.text();
+      try{ const j = JSON.parse(t); raw = j.choices?.[0]?.message?.content ?? j.message?.content ?? t; } catch{ raw = t; }
     }
-    if(!reply.content) reply.content = '(keine Antwort erhalten – anderes Modell probieren)';
+    ok = true;
   }catch(e){
-    if(e.name === 'AbortError'){ reply.content += reply.content ? '\n\n[abgebrochen]' : '[abgebrochen]'; }
+    if(e.name === 'AbortError'){ raw += raw ? '\n\n[abgebrochen]' : '[abgebrochen]'; ok = true; }
     else { c.messages.pop(); c.messages.push({ role: 'error', content: 'Fehler: ' + e.message + (cfg.provider === 'ollama' ? '\nLäuft Ollama mit OLLAMA_ORIGINS=* ?' : '') }); }
   }finally{
-    busy = false; abortCtl = null; $('sendBtn').textContent = 'Senden'; save(); render();
+    busy = false; abortCtl = null; $('sendBtn').textContent = 'Senden';
   }
+
+  if(ok){
+    for(const m of raw.matchAll(/\[\[\s*CHAR\s*:\s*([^|\]]+)\|([\s\S]*?)\]\]/gi)) upsertChar(c, m[1], m[2]);
+    const imgTags = [...raw.matchAll(/\[\[\s*IMAGE\s*:\s*([\s\S]*?)\]\]/gi)].map(m => m[1].trim()).filter(Boolean);
+    reply.content = stripTags(raw) || (imgTags.length ? '' : '(keine Antwort erhalten – anderes Modell probieren)');
+    if(!reply.content) c.messages.splice(c.messages.indexOf(reply), 1);
+    save(); render();
+    if(cfg.auto){
+      if(imgTags.length) addImage(imgTags[0], false, text);
+      else if(wantsImage) addImage(text + (reply.content ? '. Scene: ' + reply.content.slice(0, 400) : ''), false, text);
+    }
+  } else { save(); render(); }
 }
 
 function send(){
   if(busy){ abortCtl?.abort(); return; }
   const inp = $('input'); const text = inp.value.trim(); if(!text) return;
   inp.value = ''; autosize();
-  if(/^\/bild\s+/i.test(text)) return genImage(text.replace(/^\/bild\s+/i, ''));
+  if(/^\/bild\s+/i.test(text)){ const p = text.replace(/^\/bild\s+/i, ''); ensureChat(p).messages.push({ role: 'user', content: text }); return addImage(p, false, p); }
   if(/^\/perchance\s+/i.test(text)) return openPerchance(text.replace(/^\/perchance\s+/i, ''));
-  if(mode === 'img') return genImage(text);
+  if(mode === 'img'){ ensureChat(text).messages.push({ role: 'user', content: '🎨 ' + text }); return addImage(text, false, text); }
   chat(text);
 }
 
 function autosize(){ const t = $('input'); t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 200) + 'px'; }
 
-// Settings
+// ---------- Charakter-Dialog ----------
+function charRow(ch = { name: '', look: '' }){
+  const r = document.createElement('div'); r.className = 'charRow';
+  r.innerHTML = `<input placeholder="Name" value="${esc(ch.name)}"><textarea placeholder="Aussehen, z. B. woman, 25, long red curly hair, green eyes, freckles, slim, black leather jacket">${esc(ch.look)}</textarea><button class="btn" title="Entfernen">✕</button>`;
+  r.querySelector('button').onclick = () => r.remove();
+  return r;
+}
+$('charBtn').onclick = () => {
+  const c = ensureChat(); render();
+  const box = $('charRows'); box.innerHTML = '';
+  c.chars.forEach(ch => box.appendChild(charRow(ch)));
+  if(!c.chars.length) box.appendChild(charRow());
+  $('chatStyle').value = c.style;
+  $('chars').showModal();
+};
+$('addChar').onclick = () => $('charRows').appendChild(charRow());
+$('cancelChars').onclick = () => $('chars').close();
+$('saveChars').onclick = () => {
+  const c = cur(); c.chars = [];
+  $('charRows').querySelectorAll('.charRow').forEach(r => upsertChar(c, r.querySelector('input').value, r.querySelector('textarea').value));
+  c.style = $('chatStyle').value.trim();
+  save(); render(); $('chars').close();
+};
+
+// ---------- Einstellungen ----------
 const F = { provider:'sProvider', endpoint:'sEndpoint', model:'sModel', key:'sKey', temp:'sTemp', maxTok:'sMaxTok', system:'sSystem',
   imgBase:'sImgBase', imgModel:'sImgModel', imgW:'sImgW', imgH:'sImgH', imgKey:'sImgKey', theme:'sTheme' };
+const CB = { enhance:'sEnhance', auto:'sAuto', ref:'sRef' };
 const keysByProvider = store.get('fc_keys', {});
 function fillSuggestions(p){
   $('modelSuggestions').innerHTML = PROVIDERS[p].models.map(m => `<option value="${m}">`).join('');
@@ -372,7 +489,7 @@ function fillSuggestions(p){
 }
 function openSettings(){
   for(const [k, id] of Object.entries(F)) $(id).value = cfg[k] ?? '';
-  $('sEnhance').checked = !!cfg.enhance;
+  for(const [k, id] of Object.entries(CB)) $(id).checked = !!cfg[k];
   fillSuggestions(cfg.provider);
   $('settings').showModal();
 }
@@ -385,7 +502,7 @@ $('sProvider').onchange = e => {
 };
 $('saveSettings').onclick = () => {
   for(const [k, id] of Object.entries(F)) cfg[k] = $(id).value;
-  cfg.enhance = $('sEnhance').checked;
+  for(const [k, id] of Object.entries(CB)) cfg[k] = $(id).checked;
   keysByProvider[cfg.provider] = cfg.key; store.set('fc_keys', keysByProvider);
   store.set('fc_cfg', cfg); applyTheme(); $('settings').close(); render();
 };
