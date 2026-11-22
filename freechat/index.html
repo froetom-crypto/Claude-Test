@@ -164,6 +164,7 @@ dialog::backdrop{background:#0008}
     </div>
     <div class="field pollOnly"><label>Pollinations-Schlüssel (empfohlen – kostenlos auf enter.pollinations.ai)</label><input id="sImgKey" type="password" autocomplete="off" placeholder="pk_… oder sk_…"></div>
     <p class="note pollOnly">Ohne Schlüssel erlaubt Pollinations nur 1 Bild alle 45 Sekunden – die App wartet dann automatisch. Mit Schlüssel geht es schneller. Der Schlüssel bleibt nur in diesem Browser.</p>
+    <div class="field"><label><input type="checkbox" id="sReal" style="width:auto"> Fotorealistisch – echte Fotos statt Zeichnungen (wählt Foto-Modelle und passende Prompt-Begriffe)</label></div>
     <div class="field"><label><input type="checkbox" id="sAuto" style="width:auto"> Bilder automatisch erkennen und generieren</label></div>
     <div class="field"><label><input type="checkbox" id="sRef" style="width:auto"> Letztes Bild als Referenz nutzen (Modell „kontext“, experimentell – noch stärkere Ähnlichkeit)</label></div>
     <div class="field"><label><input type="checkbox" id="sEnhance" style="width:auto"> Prompt automatisch verbessern lassen</label></div>
@@ -216,7 +217,7 @@ const DEFAULTS = {
   key: '', temp: 0.9, maxTok: '',
   system: 'Du bist ein offener, direkter Gesprächspartner. Antworte ehrlich und ohne unnötige Belehrungen oder Warnhinweise. Bleib im Rollenspiel, wenn der Nutzer eines beginnt. Antworte in der Sprache des Nutzers.',
   imgBase: 'https://image.pollinations.ai/prompt/', imgModel: 'flux', imgW: 1024, imgH: 1024, imgKey: '',
-  enhance: false, auto: true, ref: false, theme: '',
+  enhance: false, auto: true, ref: false, realism: true, theme: '',
   imgProvider: 'horde', hordeModel: '', hordeKey: '', hordeNeg: 'child, teen, lowres, bad anatomy, bad hands, extra fingers, deformed, blurry, watermark, text'
 };
 // Erkennt ausdrückliche Bildwünsche ("gib mir ein Bild dazu", "zeig mal", "zeichne ...")
@@ -382,11 +383,35 @@ const MINOR = /\b(kind|kinder|kindlich|baby|kleinkind|schüler\w*|schulmädchen|
 const SEXUAL = /\b(nackt\w*|nude|naked|sex\w*|erotisch\w*|erotic|porn\w*|nsfw|topless|oben ohne|dessous|lingerie|unterwäsche|intim\w*|explicit)\b/i;
 const blockedPrompt = t => MINOR.test(t) && SEXUAL.test(t);
 
+// Fotorealismus: Prompt-Zusätze und bevorzugte Foto-Modelle auf der Horde
+const REAL_POS = 'RAW photo, photorealistic, realistic, 35mm photograph, natural skin texture, detailed skin pores, natural lighting, sharp focus, film grain';
+const REAL_NEG = 'drawing, painting, illustration, anime, cartoon, manga, 3d render, cgi, sketch, digital art, doll, plastic skin, airbrushed';
+const DRAWN = /\b(anime|manga|cartoon|comic|illustration|drawing|painting|sketch|pixel art|3d render|watercolor|zeichnung|gemälde)\b/i;
+const wantsReal = c => cfg.realism && !DRAWN.test(c?.style || '');
+// SD1.5-Foto-Modelle laufen gut bei kleinen Größen (anonym), XL-Modelle brauchen größere Bilder (mit Key)
+const REAL_MODELS_SMALL = ['Realistic Vision', "ICBINP - I Can't Believe It's Not Photography", 'Photon', 'Deliberate', 'CyberRealistic', 'epiCRealism', 'Analog Madness', 'URPM'];
+const REAL_MODELS_XL = ['Juggernaut XL', 'RealVisXL', 'AlbedoBase XL (SDXL)', 'ZavyChroma XL', 'DreamShaper XL'];
+let hordeModelCache = null;
+function getHordeModelNames(){
+  hordeModelCache ||= fetch(HORDE + '/status/models?type=image', { headers: { 'Client-Agent': 'FreeChat:1.0:anonymous' } })
+    .then(r => r.json()).then(l => l.filter(m => m.count > 0).map(m => m.name)).catch(() => { hordeModelCache = null; return []; });
+  return hordeModelCache;
+}
+async function pickRealModels(big){
+  const live = await getHordeModelNames();
+  const want = big ? [...REAL_MODELS_XL, ...REAL_MODELS_SMALL] : REAL_MODELS_SMALL;
+  const lower = live.map(n => n.toLowerCase());
+  const hits = [];
+  for(const w of want){ const i = lower.findIndex(n => n === w.toLowerCase() || n.startsWith(w.toLowerCase())); if(i >= 0 && !hits.includes(live[i])) hits.push(live[i]); }
+  return hits;
+}
+
 function buildPrompt(c, prompt, contextText){
   const used = charsIn(c, prompt + ' ' + (contextText || ''));
   let p = prompt;
   if(used.length) p += '. Character appearance (keep exactly): ' + used.map(x => x.name + ': ' + x.look).join('; ');
   if(c.style) p += '. Style: ' + c.style;
+  if(wantsReal(c) && !DRAWN.test(prompt)) p = REAL_POS + ', ' + p;
   return p.slice(0, 1800);
 }
 function imageUrl(prompt, seed, refUrl){
@@ -441,7 +466,11 @@ async function runHorde(m){
         params: { width: w, height: h, steps, cfg_scale: 7, sampler_name: 'k_euler_a', n: 1, seed: String(m.seed), karras: true },
         nsfw: true, censor_nsfw: false, trusted_workers: false, slow_workers: true, r2: true,
       };
+      const real = wantsReal(chats.find(c => c.messages.includes(m))) && !DRAWN.test(m.fullPrompt.replace(REAL_POS, ''));
+      if(real) body.prompt = m.fullPrompt + ' ### ' + REAL_NEG + (cfg.hordeNeg ? ', ' + cfg.hordeNeg : '');
       if(cfg.hordeModel) body.models = [cfg.hordeModel];
+      else if(real){ const mods = await pickRealModels(w * h > 600 * 600); if(mods.length) body.models = mods; }
+      if(real){ body.params.sampler_name = 'k_dpmpp_2m'; body.params.cfg_scale = 6; }
       const r = await fetch(HORDE + '/generate/async', { method: 'POST', headers: hordeHeaders(), body: JSON.stringify(body) });
       const j = await r.json().catch(() => ({}));
       if(!r.ok || !j.id){
@@ -642,7 +671,7 @@ $('saveChars').onclick = () => {
 // ---------- Einstellungen ----------
 const F = { provider:'sProvider', endpoint:'sEndpoint', model:'sModel', key:'sKey', temp:'sTemp', maxTok:'sMaxTok', system:'sSystem',
   imgBase:'sImgBase', imgModel:'sImgModel', imgProvider:'sImgProvider', hordeModel:'sHordeModel', hordeKey:'sHordeKey', hordeNeg:'sHordeNeg', imgW:'sImgW', imgH:'sImgH', imgKey:'sImgKey', theme:'sTheme' };
-const CB = { enhance:'sEnhance', auto:'sAuto', ref:'sRef' };
+const CB = { enhance:'sEnhance', auto:'sAuto', ref:'sRef', realism:'sReal' };
 const keysByProvider = store.get('fc_keys', {});
 let liveModels = null;
 function fillSuggestions(p){
