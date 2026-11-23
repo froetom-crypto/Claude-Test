@@ -390,7 +390,14 @@ const DICT = { frau:'woman', frauen:'women', mann:'man', männer:'men', paar:'co
   blond:'blonde', blonde:'blonde', blonden:'blonde', brünett:'brunette', brünette:'brunette', rothaarig:'redhead', rothaarige:'redhead', schwarzhaarig:'black-haired', schwarzhaarige:'black-haired', lange:'long', langen:'long', kurze:'short', kurzen:'short', haare:'hair', haaren:'hair', augen:'eyes', blaue:'blue', blauen:'blue', grüne:'green', grünen:'green', braune:'brown', braunen:'brown', rote:'red', roten:'red', schwarze:'black', schwarzen:'black', weiße:'white', weißen:'white',
   schön:'beautiful', schöne:'beautiful', schönen:'beautiful', hübsch:'pretty', hübsche:'pretty', sexy:'sexy', heiß:'hot', heiße:'hot', schlank:'slim', schlanke:'slim', kurvig:'curvy', kurvige:'curvy', groß:'tall', große:'large', kleine:'small', alt:'old', alte:'old', junge:'young', jung:'young',
   liegt:'lying', liegend:'lying', sitzt:'sitting', sitzend:'sitting', steht:'standing', stehend:'standing', läuft:'walking', geht:'walking', tanzt:'dancing', lächelt:'smiling', lächelnd:'smiling', schläft:'sleeping', küsst:'kissing', umarmt:'hugging',
-  realistisch:'photorealistic', fotorealistisch:'photorealistic', anime:'anime style', gemälde:'painting', zeichnung:'drawing', porträt:'portrait', portrait:'portrait', ganzkörper:'full body', nahaufnahme:'close-up' };
+  realistisch:'photorealistic', fotorealistisch:'photorealistic', anime:'anime style', gemälde:'painting', zeichnung:'drawing', porträt:'portrait', portrait:'portrait', ganzkörper:'full body', nahaufnahme:'close-up', ihr:'her', ihre:'her', ihrem:'her', ihren:'her', ihrer:'her', sein:'his', seine:'his', seinem:'his', seinen:'his', seiner:'his',
+  bauch:'belly', bäuchlein:'belly', bauchnabel:'navel', nabel:'navel', knie:'knee', kniee:'knees', bein:'leg', beine:'legs', beinen:'legs', oberschenkel:'thighs', schenkel:'thighs', wade:'calf', waden:'calves', fuß:'foot', fuss:'foot', füße:'feet', füßen:'feet', fuesse:'feet', zehen:'toes', ferse:'heel',
+  hand:'hand', hände:'hands', händen:'hands', finger:'fingers', fingernägel:'fingernails', arm:'arm', arme:'arms', armen:'arms', schulter:'shoulder', schultern:'shoulders', rücken:'back', po:'buttocks', hintern:'buttocks', gesäß:'buttocks', hüfte:'hips', hüften:'hips', taille:'waist',
+  brust:'chest', brüste:'breasts', busen:'breasts', dekolleté:'cleavage', hals:'neck', nacken:'nape of the neck', lippen:'lips', mund:'mouth', nase:'nose', ohr:'ear', ohren:'ears', haut:'skin', tattoo:'tattoo', piercing:'piercing', körper:'body', kopf:'head',
+  seite:'side', profil:'profile', hinten:'from behind', vorne:'from the front', oben:'from above', unten:'from below' };
+// Farben in allen deutschen Endungen (rot, rote, roten, roter, rotes, rotem)
+for(const [de, en] of Object.entries({ rot:'red', blau:'blue', grün:'green', gelb:'yellow', schwarz:'black', weiß:'white', weiss:'white', braun:'brown', rosa:'pink', pink:'pink', lila:'purple', violett:'purple', orange:'orange', grau:'gray', silbern:'silver', golden:'golden', bunt:'colorful', dunkel:'dark', hell:'light' }))
+  for(const end of ['', 'e', 'en', 'er', 'es', 'em']) DICT[de + end] ||= en;
 function toEnglishPrompt(text){
   const words = text.replace(/[„“"!?.,;:]+/g, ' ').split(/\s+/).filter(Boolean);
   const out = [];
@@ -407,12 +414,27 @@ const blockedPrompt = t => MINOR.test(t) && SEXUAL.test(t);
 const REAL_PRE = '(RAW photo:1.2) of ';
 const REAL_POS = '(photorealistic:1.3), 35mm photograph, realistic skin, natural light, sharp focus, high detail';
 // Bildausschnitt: Ganzkörper als Standard, Porträt nur auf Wunsch
-const FULL_POS = 'full body shot, centered, whole body in frame from head to toe, facing camera, detailed face';
+const FULL_POS = 'full body shot, centered, whole body in frame from head to toe';
+// Fokus auf ein bestimmtes Körperteil: genau das zeigen, nicht das Gesicht
+const BODY_PARTS = ['belly','stomach','navel','knee','knees','leg','legs','thigh','thighs','calf','calves','foot','feet','toes','heel','hand','hands','fingers','fingernails','arm','arms','shoulder','shoulders','back','buttocks','butt','hips','waist','chest','breasts','cleavage','neck','nape of the neck','lips','mouth','nose','ear','ears','skin','tattoo','piercing','eyes','face','hair'];
+const FACE_PARTS = /^(lips|mouth|nose|ear|ears|eyes|face|hair)$/;
+const FACE_TRAITS = /\b(eyes?|eyebrows?|lashes|hair\w*|face|facial|lips|nose|freckles?|makeup|smile|cheeks?|jaw|chin|forehead|bangs|ponytail|braids?|curls?|blonde|brunette|redhead)\b/i;
+function bodyFocus(text){
+  const t = ' ' + text.toLowerCase().replace(/[^a-zäöüß\s-]/g, ' ') + ' ';
+  for(const [de, en] of Object.entries(DICT)) if(BODY_PARTS.includes(en) && t.includes(' ' + de + ' ')) return en;
+  return BODY_PARTS.find(en => t.includes(' ' + en + ' ')) || null;
+}
+const stripFaceTraits = look => look.split(/,\s*/).filter(part => !FACE_TRAITS.test(part)).join(', ');
+const focusOf = m => (m.fullPrompt || '').match(/close-up of (?:her |his |the )?([a-z ]+?), /)?.[1] || null;
 const FULL_NEG = 'close-up, portrait, cropped, head out of frame, feet out of frame, off-center, deformed face';
 const WANTS_CLOSE = /\b(portrait|porträt|portr\w*|close-?up|nahaufnahme|gesicht|face|headshot|selfie|brustbild|oberkörper|upper body|bust)\b/i;
 const HAS_PERSON = /\b(woman|women|man|men|girl|guy|lady|person|people|couple|she|he|her|him|frau|frauen|mann|männer|person|paar|sie|er|model|character)\b/i;
 const isFullBody = m => (m.fullPrompt || '').includes('full body shot, ');
-function negFor(m, real){ return [real ? REAL_NEG : '', isFullBody(m) ? FULL_NEG : '', cfg.hordeNeg || ''].filter(Boolean).join(', '); }
+function negFor(m, real){
+  const f = focusOf(m);
+  const focusNeg = f && !FACE_PARTS.test(f) ? '(face, head, portrait, eyes:1.3), full body, wide shot' : '';
+  return [real ? REAL_NEG : '', isFullBody(m) ? FULL_NEG : '', focusNeg, cfg.hordeNeg || ''].filter(Boolean).join(', ');
+}
 const REAL_NEG = '(watercolor, painting, drawing, illustration, sketch, anime, cartoon, 3d render, cgi:1.4), digital art, oil painting, airbrushed, plastic skin, doll';
 const DRAWN = /\b(anime|manga|cartoon|comic|illustration|drawing|painting|sketch|pixel art|3d render|watercolor|zeichnung|gemälde)\b/i;
 const wantsReal = c => cfg.realism && !DRAWN.test(c?.style || '');
@@ -445,10 +467,13 @@ function buildPrompt(c, prompt, contextText){
   const real = wantsReal(c) && !DRAWN.test(prompt);
   const framing = cfg.framing || 'auto';
   const person = used.length || HAS_PERSON.test(prompt + ' ' + (contextText || ''));
-  const full = framing === 'full' || (framing === 'auto' && person && !WANTS_CLOSE.test(prompt + ' ' + (contextText || '')));
-  let p = (real ? REAL_PRE : '') + prompt;
+  const focus = bodyFocus(prompt) || bodyFocus(contextText || '');
+  const faceFocus = focus && FACE_PARTS.test(focus);
+  const full = !focus && (framing === 'full' || (framing === 'auto' && person && !WANTS_CLOSE.test(prompt + ' ' + (contextText || ''))));
+  let p = (real ? REAL_PRE : '') + (focus ? 'close-up of ' + (person ? 'her ' : 'the ') + focus + ', ' : '') + prompt;
+  if(focus) p += ', (' + focus + ' in the center of the frame:1.3), focus on the ' + focus + (faceFocus ? '' : ', face not visible');
   if(full) p += ', ' + FULL_POS;
-  if(used.length) p += ', ' + used.map(x => x.name + ': ' + x.look).join('; ');
+  if(used.length) p += ', ' + used.map(x => x.name + ': ' + (focus && !faceFocus ? stripFaceTraits(x.look) : x.look)).filter(t => !/:\s*$/.test(t)).join('; ');
   if(real) p += ', ' + REAL_POS;
   if(c.style) p += ', ' + c.style;
   return p.slice(0, 1800);
@@ -609,7 +634,7 @@ function imageRules(c){
 [Image tool — follow silently]
 You can show the user images. Whenever the user asks for a picture in any wording (e.g. "gib mir ein Bild dazu", "zeig mal", "wie sieht sie aus?", "mach ein Foto davon"), or when an image would clearly enrich the moment (a new scene, a character's first appearance), end your reply with exactly one line:
 [[IMAGE: <detailed English image prompt>]]
-The image prompt must be self-contained: subjects, pose, expression, clothing, setting, lighting, camera angle and art style. For every character or person in the picture, restate their full established appearance (gender, age, face, hair, eyes, skin, body type, typical clothing) so they look identical to earlier images. Keep the art style consistent with earlier images.${lastImg ? '\nPrevious image prompt (keep style and looks consistent): ' + lastImg.content : ''}
+The image prompt must show exactly what the user asked to see. If they ask for a specific body part, object or detail (e.g. belly, knee, hands, feet, a car, a room), make that the main subject as a close-up and do not default to a face or portrait. Otherwise be self-contained: subjects, pose, clothing, setting, lighting, camera angle and art style. For characters, restate the established appearance details that are visible in this shot (skin, body type, clothing; face and hair only if the face is visible) so they look consistent. Keep the art style consistent with earlier images.${lastImg ? '\nPrevious image prompt (keep style and looks consistent): ' + lastImg.content : ''}
 
 [Character sheet]
 Whenever a character or person is introduced, or their appearance is described or changes, add a line:
