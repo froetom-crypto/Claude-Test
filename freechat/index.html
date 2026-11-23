@@ -121,7 +121,8 @@ dialog::backdrop{background:#0008}
     <div class="field">
       <label>Anbieter</label>
       <select id="sProvider">
-        <option value="pollinations">Pollinations (kostenlos, kein Key)</option>
+        <option value="hordetext">AI Horde Text (kostenlos, offene Modelle ohne Inhaltsfilter, 18+ möglich)</option>
+        <option value="pollinations">Pollinations (kostenlos, kein Key – lehnt sexuelle Themen ab)</option>
         <option value="openrouter">OpenRouter (eigener API-Key, hunderte Modelle)</option>
         <option value="ollama">Ollama (lokal auf deinem Rechner)</option>
         <option value="custom">Eigener OpenAI-kompatibler Endpoint</option>
@@ -227,13 +228,15 @@ const PROVIDERS = {
   ollama: { endpoint: 'http://localhost:11434/v1/chat/completions', model: 'llama3.1',
     models: ['llama3.1','mistral','qwen2.5','gemma2','dolphin-mistral'],
     note: 'Läuft komplett auf deinem Rechner, nichts verlässt dein Gerät. Ollama mit OLLAMA_ORIGINS=* starten, damit der Browser zugreifen darf. Modelle mit "ollama pull <name>" laden.' },
+  hordetext: { endpoint: 'https://aihorde.net/api/v2/generate/text/async', model: 'auto', models: ['auto'],
+    note: 'Kostenloses Freiwilligen-Netzwerk mit offenen Text-Modellen, viele davon für Rollenspiel und ohne Inhaltsfilter. „auto“ nimmt das Modell, das gerade frei ist; über das Modell-Feld siehst du alle laufenden Modelle. Antworten dauern je nach Andrang 10 Sekunden bis ein paar Minuten. Den Horde-Key (falls du einen hast) trägst du unten bei den Bild-Einstellungen ein – er gilt auch hier.' },
   custom: { endpoint: '', model: '', models: [],
     note: 'Jeder Dienst mit OpenAI-kompatibler /chat/completions-Schnittstelle (z. B. LM Studio, Together, Groq, Mistral, KoboldCpp).' }
 };
 const DEFAULTS = {
-  provider: 'pollinations', endpoint: PROVIDERS.pollinations.endpoint, model: PROVIDERS.pollinations.model,
+  provider: 'hordetext', endpoint: 'https://aihorde.net/api/v2/generate/text/async', model: 'auto',
   key: '', temp: 0.9, maxTok: '',
-  system: 'Du bist ein offener, direkter Gesprächspartner. Antworte ehrlich und ohne unnötige Belehrungen oder Warnhinweise. Bleib im Rollenspiel, wenn der Nutzer eines beginnt. Antworte in der Sprache des Nutzers.',
+  system: 'Du bist ein offener, direkter Gesprächs- und Rollenspielpartner. Der Nutzer ist volljährig. Alle Themen sind erlaubt, auch erotische und sexuelle Inhalte zwischen Erwachsenen – auf Wunsch auch explizit. Antworte thematisch passend, ehrlich und ohne Belehrungen, Moralpredigten oder Warnhinweise, und bleib im Rollenspiel. Feste Grenzen: keine sexuellen Inhalte mit Minderjährigen oder kindlich wirkenden Figuren und keine sexuellen Inhalte über reale, identifizierbare Personen. Antworte in der Sprache des Nutzers.',
   imgBase: 'https://image.pollinations.ai/prompt/', imgModel: 'flux', imgW: 832, imgH: 1216, imgKey: '',
   enhance: false, auto: true, ref: false, realism: true, framing: 'auto', theme: '',
   imgProvider: 'horde', hordeModel: '', hordeKey: '', hordeNeg: 'child, teen, lowres, bad anatomy, bad hands, extra fingers, deformed, blurry, watermark, text'
@@ -249,6 +252,11 @@ let cfg = Object.assign({}, DEFAULTS, store.get('fc_cfg', {}));
 if(!store.get('fc_mig1', false)){ if(cfg.provider === 'pollinations' && cfg.model === 'openai') cfg.model = 'mistral'; store.set('fc_cfg', cfg); store.set('fc_mig1', true); }
 if(!store.get('fc_mig2', false)){ cfg.imgProvider = 'horde'; if(cfg.hordeNeg && !/child/.test(cfg.hordeNeg)) cfg.hordeNeg = 'child, teen, ' + cfg.hordeNeg; store.set('fc_cfg', cfg); store.set('fc_mig2', true); }
 if(!store.get('fc_mig3', false)){ if(+cfg.imgW === 1024 && +cfg.imgH === 1024){ cfg.imgW = 832; cfg.imgH = 1216; } store.set('fc_cfg', cfg); store.set('fc_mig3', true); }
+if(!store.get('fc_mig4', false)){
+  if(cfg.provider === 'pollinations'){ cfg.provider = 'hordetext'; cfg.endpoint = 'https://aihorde.net/api/v2/generate/text/async'; cfg.model = 'auto'; }
+  if(!cfg.system || cfg.system === 'Du bist ein offener, direkter Gesprächspartner. Antworte ehrlich und ohne unnötige Belehrungen oder Warnhinweise. Bleib im Rollenspiel, wenn der Nutzer eines beginnt. Antworte in der Sprache des Nutzers.') cfg.system = DEFAULTS.system;
+  store.set('fc_cfg', cfg); store.set('fc_mig4', true);
+}
 // Erkennt typische Ablehnungen des Chat-Modells
 const REFUSAL = /(sorry|entschuldig|tut mir leid|leider nicht|kann ich (dir )?(dabei )?nicht|darf ich nicht|nicht (erstellen|generieren|helfen)|I can'?t|I cannot|I'm unable|I am unable|not able to (help|create)|against (my|the) (guidelines|policy))/i;
 let chats = store.get('fc_chats', []);
@@ -661,6 +669,46 @@ async function pickPollModel(exclude){
   return cfg.model;
 }
 
+// ---------- AI Horde Text (offene Modelle, kein Inhaltsfilter) ----------
+async function hordeText(messages, onStatus, signal, small){
+  const sys = messages[0].content;
+  const lines = messages.slice(1).map(m => (m.role === 'user' ? 'User: ' : 'Assistant: ') + m.content);
+  const ctxTokens = small ? 1024 : 2048, budget = small ? 2600 : 5600;
+  let sysText = sys.length > budget * 0.5 ? sys.slice(0, Math.floor(budget * 0.5)) : sys;
+  while(lines.length > 1 && (sysText.length + lines.join('\n').length) > budget) lines.shift();
+  const prompt = sysText + '\n\n' + lines.join('\n') + '\nAssistant:';
+  const body = { prompt, trusted_workers: false, slow_workers: true,
+    params: { n: 1, max_context_length: ctxTokens, max_length: small ? 200 : 350, temperature: Number(cfg.temp) || 0.9, top_p: 0.92, rep_pen: 1.1,
+      stop_sequence: ['\nUser:', '\nUser :', '\nuser:', '<|im_end|>', '</s>', '<|eot_id|>'], frmttriminc: true } };
+  if(cfg.model && cfg.model !== 'auto') body.models = [cfg.model];
+  const hdr = { 'Content-Type': 'application/json', 'apikey': cfg.hordeKey || '0000000000', 'Client-Agent': 'FreeChat:1.0:anonymous' };
+  onStatus('sendet an AI Horde…');
+  const r = await fetch(HORDE + '/generate/text/async', { method: 'POST', headers: hdr, body: JSON.stringify(body), signal });
+  const j = await r.json().catch(() => ({}));
+  if(!r.ok || !j.id){
+    if(/kudos|context|length/i.test(j.message || '') && !small) return hordeText(messages, onStatus, signal, true);
+    throw new Error('AI Horde: ' + (j.message || ('HTTP ' + r.status)));
+  }
+  while(true){
+    await new Promise((res, rej) => { const t = setTimeout(res, 3000); signal.addEventListener('abort', () => { clearTimeout(t); rej(new DOMException('aborted', 'AbortError')); }, { once: true }); });
+    const st = await (await fetch(HORDE + '/generate/text/status/' + j.id, { headers: { 'Client-Agent': 'FreeChat:1.0:anonymous' }, signal })).json();
+    if(st.faulted) throw new Error('Der Rechner, der antworten sollte, ist ausgefallen – bitte nochmal senden.');
+    if(st.is_possible === false){
+      fetch(HORDE + '/generate/text/status/' + j.id, { method: 'DELETE', headers: { 'Client-Agent': 'FreeChat:1.0:anonymous' } }).catch(() => {});
+      if(body.models) throw new Error('Für das gewählte Modell ist gerade kein Rechner frei – unter ⚙ „auto“ wählen.');
+      if(!small) return hordeText(messages, onStatus, signal, true);
+      throw new Error('Gerade ist kein Rechner frei – bitte gleich nochmal versuchen.');
+    }
+    if(st.done){
+      const g = st.generations?.[0];
+      const text = (g?.text || '').replace(/\n(User|Assistant)\s*:[\s\S]*$/i, '').replace(/^\s*Assistant\s*:\s*/i, '').trim();
+      if(!text) throw new Error('Leere Antwort erhalten – bitte nochmal senden.');
+      return { text, model: g?.model || '' };
+    }
+    onStatus((st.queue_position ? 'Platz ' + st.queue_position + ' · ' : '') + 'Antwort kommt in ca. ' + Math.max(1, st.wait_time || 0) + ' s' + (st.processing ? ' · wird geschrieben' : ''));
+  }
+}
+
 async function chat(text){
   const c = ensureChat(text);
   c.messages.push({ role: 'user', content: text });
@@ -684,9 +732,13 @@ async function chat(text){
   const show = () => { const v = stripTags(raw); bubble.innerHTML = v ? fmt(v) : '<span class="typing">schreibt…</span>'; $('messages').scrollTop = $('messages').scrollHeight; };
   busy = true; $('sendBtn').textContent = 'Stopp'; abortCtl = new AbortController();
   let ok = false, timedOut = false, timer;
-  const arm = () => { clearTimeout(timer); timer = setTimeout(() => { timedOut = true; abortCtl?.abort(); }, 60000); };
+  const arm = () => { clearTimeout(timer); timer = setTimeout(() => { timedOut = true; abortCtl?.abort(); }, cfg.provider === 'hordetext' ? 360000 : 60000); };
   try{
     arm();
+    if(cfg.provider === 'hordetext'){
+      const out = await hordeText(body.messages, t => { if(!raw) bubble.innerHTML = '<span class="typing">' + esc(t) + '</span>'; }, abortCtl.signal);
+      raw = out.text; reply.model = out.model;
+    } else {
     let res;
     for(let attempt = 0; attempt < 3; attempt++){
       res = await fetch(cfg.endpoint, { method: 'POST', headers, body: JSON.stringify(body), signal: abortCtl.signal });
@@ -714,6 +766,7 @@ async function chat(text){
     } else {
       const t = await res.text();
       try{ const j = JSON.parse(t); raw = j.choices?.[0]?.message?.content ?? j.message?.content ?? t; } catch{ raw = t; }
+    }
     }
     ok = true;
   }catch(e){
@@ -748,6 +801,7 @@ function send(){
   if(busy){ abortCtl?.abort(); return; }
   const inp = $('input'); const text = inp.value.trim(); if(!text) return;
   inp.value = ''; autosize();
+  if(blockedPrompt(text)){ const c = ensureChat(text); c.messages.push({ role: 'user', content: text }, { role: 'error', content: 'Darauf gehe ich nicht ein: sexuelle Inhalte mit Minderjährigen sind ausgeschlossen.' }); save(); render(); return; }
   if(/^\/bild\s+/i.test(text)){ const p = text.replace(/^\/bild\s+/i, ''); ensureChat(p).messages.push({ role: 'user', content: text }); return addImage(toEnglishPrompt(p), false, p); }
   if(/^\/perchance\s+/i.test(text)) return openPerchance(text.replace(/^\/perchance\s+/i, ''));
   if(mode === 'img'){ ensureChat(text).messages.push({ role: 'user', content: '🎨 ' + text }); return addImage(toEnglishPrompt(text), false, text); }
@@ -790,6 +844,12 @@ function fillSuggestions(p){
   const opts = list => list.map(m => `<option value="${esc(m.name)}">${esc(m.desc || '')}</option>`).join('');
   $('modelSuggestions').innerHTML = opts((p === 'pollinations' && liveModels) || PROVIDERS[p].models.map(name => ({ name })));
   $('providerNote').textContent = PROVIDERS[p].note;
+  if(p === 'hordetext'){
+    fetch(HORDE + '/status/models?type=text', { headers: { 'Client-Agent': 'FreeChat:1.0:anonymous' } }).then(r => r.json()).then(list => {
+      list.sort((a, b) => (b.count || 0) - (a.count || 0));
+      if($('sProvider').value === 'hordetext') $('modelSuggestions').innerHTML = '<option value="auto">beliebiges freies Modell</option>' + list.map(m => `<option value="${esc(m.name)}">${m.count} Rechner</option>`).join('');
+    }).catch(() => {});
+  }
   if(p === 'pollinations' && !liveModels){
     fetch(PROVIDERS.pollinations.listUrl).then(r => r.json()).then(j => {
       const arr = (Array.isArray(j) ? j : j.data || []).map(m => typeof m === 'string' ? { name: m } : { name: m.name || m.id, desc: m.description || '' }).filter(m => m.name);
